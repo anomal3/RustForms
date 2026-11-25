@@ -1,0 +1,12 @@
+/target/
+**/*.rs.bk
+
+# IDE
+.idea/
+.vs/
+
+# плагины
+plugins/**/build/
+plugins/**/.gradle/
+plugins/**/bin/
+plugins/**/obj/

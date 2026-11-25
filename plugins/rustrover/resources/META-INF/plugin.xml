@@ -1,0 +1,43 @@
+<idea-plugin>
+    <id>dev.rustforms.rustrover</id>
+    <name>RustForms</name>
+    <version>0.2.2</version>
+    <vendor>RustForms</vendor>
+    <description><![CDATA[
+    Дизайнер форм RustForms: новый проект и форма, открытие дизайнера, переход
+    к обработчику после двойного клика и запуск проекта.
+    ]]></description>
+    <idea-version since-build="263"/>
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <fileType name="RustForms Form" extensions="rfrm" fieldName="INSTANCE"
+                  implementationClass="dev.rustforms.rustrover.FormFileType"/>
+        <fileEditorProvider id="rustforms-designer"
+                            implementation="dev.rustforms.rustrover.FormEditorProvider"/>
+        <directoryProjectGenerator implementation="dev.rustforms.rustrover.ProjectGenerator"/>
+        <toolWindow id="RustForms Toolbox" anchor="left" secondary="true" icon="AllIcons.Toolwindows.ToolWindowPalette"
+                    factoryClass="dev.rustforms.rustrover.SideWindow$Toolbox"/>
+        <toolWindow id="RustForms Properties" anchor="right" icon="AllIcons.Toolwindows.ToolWindowStructure"
+                    factoryClass="dev.rustforms.rustrover.SideWindow$Properties"/>
+        <notificationGroup id="RustForms" displayType="BALLOON"/>
+    </extensions>
+
+    <actions>
+        <action id="RustForms.NewProject" class="dev.rustforms.rustrover.NewProjectAction"
+                text="RustForms Project..." description="Создать проект с формой">
+            <add-to-group group-id="NewGroup" anchor="last"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+        <action id="RustForms.NewForm" class="dev.rustforms.rustrover.NewFormAction"
+                text="RustForms Form..." description="Добавить форму в папку">
+            <add-to-group group-id="NewGroup" anchor="last"/>
+        </action>
+        <action id="RustForms.OpenDesigner" class="dev.rustforms.rustrover.OpenDesignerAction"
+                text="Open RustForms Designer" description="Открыть форму в дизайнере">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="first"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>

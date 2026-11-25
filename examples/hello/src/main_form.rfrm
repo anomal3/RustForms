@@ -1,0 +1,72 @@
+[form]
+name = "MainForm"
+title = "RustForms — привет"
+width = 420.0
+height = 230.0
+
+[[control]]
+type = "Label"
+name = "question"
+x = 20.0
+y = 20.0
+width = 200.0
+height = 22.0
+text = "Как тебя зовут?"
+
+[[control]]
+type = "TextBox"
+name = "name_box"
+x = 20.0
+y = 48.0
+width = 380.0
+height = 30.0
+
+[[control]]
+type = "CheckBox"
+name = "shout"
+x = 20.0
+y = 90.0
+width = 140.0
+height = 22.0
+text = "Громко"
+
+[[control]]
+type = "Panel"
+name = "panel1"
+x = 20.0
+y = 122.0
+width = 380.0
+height = 44.0
+
+[[control]]
+type = "Label"
+name = "result"
+parent = "panel1"
+x = 10.0
+y = 11.0
+width = 360.0
+height = 22.0
+
+[[control]]
+type = "Button"
+name = "greet_button"
+x = 180.0
+y = 184.0
+width = 124.0
+height = 30.0
+text = "Поздороваться"
+
+[control.events]
+click = "greet_button_click"
+
+[[control]]
+type = "Button"
+name = "close_button"
+x = 310.0
+y = 184.0
+width = 90.0
+height = 30.0
+text = "Закрыть"
+
+[control.events]
+click = "close_button_click"

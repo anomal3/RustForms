@@ -1,0 +1,16 @@
+[package]
+name = "rustforms-designer"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+base64 = "0.22"
+eframe = "0.37.0"
+rfd = "0.18.0"
+rustforms = { version = "0.1.0", path = "../rustforms" }
+rustforms-model = { path = "../rustforms-model" }
+serde_json = "1"
+tiny-skia = "0.12"
+
+[dev-dependencies]
+egui_kittest = { version = "0.37", features = ["eframe", "wgpu"] }
