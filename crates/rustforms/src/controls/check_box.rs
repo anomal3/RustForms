@@ -49,6 +49,10 @@ impl ControlImpl for CheckBox {
         let (_, height) = p.size();
         let mark = Rect::new(1.0, (height - 16.0) / 2.0, 16.0, 16.0);
         let border = if state.focused || state.hovered { Color::ACCENT } else { Color::BORDER };
+        if let Some(back) = p.back {
+            let area = p.area();
+            p.fill_rect(area, back);
+        }
         p.fill_round_rect(mark, 3.0, border);
         if self.checked {
             p.fill_round_rect(mark.inset(1.0), 2.5, Color::WHITE);
@@ -57,7 +61,7 @@ impl ControlImpl for CheckBox {
             let face = if state.enabled { Color::WHITE } else { Color::FORM };
             p.fill_round_rect(mark.inset(1.0), 2.5, face);
         }
-        let ink = if state.enabled { Color::TEXT } else { Color::TEXT_DISABLED };
+        let ink = p.fore_color(Color::TEXT);
         let (width, _) = p.size();
         p.text(&self.text, Rect::new(24.0, 0.0, width - 24.0, height), ink, Align::Left, 0.0);
     }

@@ -103,12 +103,16 @@ pub fn attach_handler(
     let mut model = load(rfrm)?;
     let (handler, event) = match control {
         None => {
-            if event.is_some_and(|e| e != Event::Load) {
-                return fail("у формы есть только событие load");
-            }
+            let event = event.unwrap_or(Event::Load);
+            let slot = match event {
+                Event::Load => &mut model.form.load,
+                Event::Closing => &mut model.form.closing,
+                Event::Resize => &mut model.form.resize,
+                _ => return fail("у формы есть только события load, closing и resize"),
+            };
             let stem = files.rfrm.file_stem().and_then(|s| s.to_str()).unwrap_or("form");
-            let name = model.form.load.get_or_insert_with(|| format!("{stem}_load"));
-            (name.clone(), Event::Load)
+            let name = slot.get_or_insert_with(|| format!("{stem}_{}", event.name()));
+            (name.clone(), event)
         }
         Some(wanted) => {
             let Some(c) = model.controls.iter_mut().find(|c| c.name == wanted) else {
@@ -145,9 +149,16 @@ pub fn new_form(dir: &Path, name: &str) -> Result<PathBuf, Error> {
     Ok(files.rfrm)
 }
 
+/// Откуда новый проект берёт библиотеку.
+pub enum Library<'a> {
+    /// Папка крейта на этой машине.
+    Path(&'a Path),
+    /// Репозиторий и тег: так проект собирается там, где исходников нет.
+    Git { url: &'a str, tag: &'a str },
+}
+
 /// Создаёт новый проект Cargo с главной формой и возвращает путь к её `.rfrm`.
-/// `rustforms` — папка крейта библиотеки.
-pub fn new_project(dir: &Path, rustforms: &Path) -> Result<PathBuf, Error> {
+pub fn new_project(dir: &Path, library: Library) -> Result<PathBuf, Error> {
     let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_owned();
     let valid = name.starts_with(|c: char| c.is_ascii_alphabetic())
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
@@ -162,7 +173,13 @@ pub fn new_project(dir: &Path, rustforms: &Path) -> Result<PathBuf, Error> {
     if src.join("main.rs").exists() {
         return fail(format!("{} уже существует", src.join("main.rs").display()));
     }
-    let library = rustforms.display().to_string().replace('\\', "/");
+    let dependency = match library {
+        Library::Path(path) => {
+            let path = path.display().to_string().replace('\\', "/");
+            format!("{{ path = {path:?} }}")
+        }
+        Library::Git { url, tag } => format!("{{ git = {url:?}, tag = {tag:?} }}"),
+    };
     // Пустой [workspace] не даёт проекту прицепиться к внешнему workspace.
     let manifest = format!(
         "[package]
@@ -171,7 +188,7 @@ version = \"0.1.0\"
 edition = \"2024\"
 
 [dependencies]
-rustforms = {{ path = {library:?} }}
+rustforms = {dependency}
 
 [profile.dev.package.\"*\"]
 opt-level = 2
@@ -192,6 +209,12 @@ fn main() -> Result<(), rustforms::RunError> {
 ",
     )?;
     write(&dir.join(".gitignore"), "/target/\n")?;
+    if matches!(library, Library::Git { .. }) {
+        // Доступ к репозиторию берётся из настроек обычного git, в том числе к приватному.
+        let config = dir.join(".cargo");
+        fs::create_dir_all(&config).map_err(|e| Error(format!("{}: {e}", config.display())))?;
+        write(&config.join("config.toml"), "[net]\ngit-fetch-with-cli = true\n")?;
+    }
     write(&dir.join("Cargo.toml"), &manifest)?;
     Ok(rfrm)
 }

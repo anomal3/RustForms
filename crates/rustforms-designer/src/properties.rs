@@ -1,7 +1,7 @@
 //! Правая панель: свойства и события выбранного контрола или самой формы.
 
 use eframe::egui::{self, DragValue, Grid, TextEdit};
-use rustforms_model::{Dock, Event, Kind, Side};
+use rustforms_model::{Align, Dock, Event, Kind, Side};
 
 use crate::{
     app::{Designer, Request},
@@ -114,8 +114,12 @@ fn form_properties(
     });
     ui.separator();
     ui.strong("События");
+    let mut closing = None;
+    let mut resize = None;
     Grid::new("form events").num_columns(2).show(ui, |ui| {
         load = event_rows(ui, None, Event::Load, form.load.as_deref(), request);
+        closing = event_rows(ui, None, Event::Closing, form.closing.as_deref(), request);
+        resize = event_rows(ui, None, Event::Resize, form.resize.as_deref(), request);
     });
 
     if form != document.model.form {
@@ -128,6 +132,12 @@ fn form_properties(
     }
     if let Some(handler) = load {
         document.edit(|m| m.form.load = (!handler.is_empty()).then_some(handler))?;
+    }
+    if let Some(handler) = closing {
+        document.edit(|m| m.form.closing = (!handler.is_empty()).then_some(handler))?;
+    }
+    if let Some(handler) = resize {
+        document.edit(|m| m.form.resize = (!handler.is_empty()).then_some(handler))?;
     }
     Ok(())
 }
@@ -235,14 +245,55 @@ fn control_properties(
                 }
                 c.maximum = c.maximum.max(c.minimum);
             }
-            Kind::Label => color_row(ui, "Цвет текста", &mut c.fore_color),
+            Kind::Label => {}
             Kind::Panel => {
-                color_row(ui, "Фон", &mut c.back_color);
                 ui.label("Рамка");
                 ui.checkbox(&mut c.border, "");
                 ui.end_row();
             }
             Kind::Button => {}
+        }
+        color_row(ui, "Цвет текста", &mut c.fore_color);
+        color_row(ui, "Фон", &mut c.back_color);
+        ui.label("Шрифт");
+        ui.horizontal(|ui| {
+            let mut size = c.font_size.unwrap_or(14.0);
+            if ui.add(DragValue::new(&mut size).range(4.0..=200.0).max_decimals(0)).changed() {
+                c.font_size = (size != 14.0).then_some(size);
+            }
+            ui.checkbox(&mut c.bold, "жирный");
+        });
+        ui.end_row();
+        ui.label("Подсказка");
+        let mut tooltip = c.tooltip.clone().unwrap_or_default();
+        if ui.add(TextEdit::singleline(&mut tooltip).desired_width(f32::INFINITY)).changed() {
+            c.tooltip = (!tooltip.is_empty()).then_some(tooltip);
+        }
+        ui.end_row();
+        if c.kind.focusable() {
+            ui.label("Порядок Tab");
+            ui.add(DragValue::new(&mut c.tab_index));
+            ui.end_row();
+        }
+        if matches!(c.kind, Kind::Button | Kind::Label) {
+            ui.label("Выравнивание");
+            egui::ComboBox::from_id_salt(("align", name))
+                .selected_text(c.align.map_or("по умолчанию", Align::name))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut c.align, None, "по умолчанию");
+                    for align in Align::ALL {
+                        ui.selectable_value(&mut c.align, Some(align), align.name());
+                    }
+                });
+            ui.end_row();
+        }
+        if c.kind == Kind::TextBox {
+            ui.label("Только чтение");
+            ui.checkbox(&mut c.read_only, "");
+            ui.end_row();
+            ui.label("Пароль");
+            ui.checkbox(&mut c.password, "");
+            ui.end_row();
         }
         ui.label("Dock");
         egui::ComboBox::from_id_salt(("dock", name))
@@ -291,7 +342,7 @@ fn control_properties(
         ui.separator();
         ui.strong("События");
         Grid::new(("events", name)).num_columns(2).show(ui, |ui| {
-            for &event in c.kind.events() {
+            for event in c.kind.events() {
                 let current = c.events.get(&event).map(String::as_str);
                 if let Some(value) = event_rows(ui, Some(name), event, current, request) {
                     handlers.push((event, value));

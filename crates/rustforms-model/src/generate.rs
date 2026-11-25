@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use crate::{
-    Control, Dock, Error, Event, FormModel, Kind, default_anchor, model::parse_color,
+    Align, Control, Dock, Error, Event, FormModel, Kind, default_anchor, model::parse_color,
 };
 
 /// Содержимое `*.designer.rs`. Модуль подключается из файла формы как дочерний.
@@ -80,7 +80,7 @@ pub fn designer_code(model: &FormModel) -> Result<String, Error> {
     line!("        }};");
 
     line!("");
-    let empty = model.controls.is_empty() && form.load.is_none();
+    let empty = model.controls.is_empty() && model.handlers().is_empty();
     line!("        let {}view = View::new();", if empty { "" } else { "mut " });
     for c in &model.controls {
         let field = format!("|f: &mut Self| &mut f.{}", c.name);
@@ -97,12 +97,16 @@ pub fn designer_code(model: &FormModel) -> Result<String, Error> {
             }
         }
     }
-    if let Some(handler) = &form.load {
-        line!("        view.on_load(Self::{handler});");
+    for (event, handler) in
+        [(Event::Load, &form.load), (Event::Closing, &form.closing), (Event::Resize, &form.resize)]
+    {
+        if let Some(handler) = handler {
+            line!("        view.on_{}(Self::{handler});", event.name());
+        }
     }
     for c in &model.controls {
         for (event, handler) in &c.events {
-            if *event != Event::Load {
+            if !Event::FORM.contains(event) {
                 line!("        view.on_{}({}_id, Self::{handler});", event.name(), c.name);
             }
         }
@@ -174,18 +178,42 @@ fn setup_lines(c: &Control) -> Result<Vec<String>, Error> {
     if !c.enabled {
         lines.push("set_enabled(false)".into());
     }
-    if c.kind == Kind::Label
-        && let Some(color) = &c.fore_color
-    {
-        lines.push(format!("fore_color = {}", color_code(color)?));
+    if let Some(color) = &c.fore_color {
+        lines.push(format!("set_fore_color({})", color_code(color)?));
     }
-    if c.kind == Kind::Panel {
-        if let Some(color) = &c.back_color {
-            lines.push(format!("back_color = {}", color_code(color)?));
+    if let Some(color) = &c.back_color {
+        lines.push(format!("set_back_color({})", color_code(color)?));
+    }
+    if let Some(size) = c.font_size {
+        lines.push(format!("set_font_size({size:?})"));
+    }
+    if c.bold {
+        lines.push("set_bold(true)".into());
+    }
+    if let Some(text) = c.tooltip.as_deref().filter(|t| !t.is_empty()) {
+        lines.push(format!("set_tooltip({text:?})"));
+    }
+    if c.tab_index != 0 {
+        lines.push(format!("set_tab_index({})", c.tab_index));
+    }
+    if let Some(align) = c.align {
+        let value = match align {
+            Align::Left => "Left",
+            Align::Center => "Center",
+            Align::Right => "Right",
+        };
+        lines.push(format!("set_text_align(TextAlign::{value})"));
+    }
+    if c.kind == Kind::TextBox {
+        if c.read_only {
+            lines.push("set_read_only(true)".into());
         }
-        if !c.border {
-            lines.push("border = false".into());
+        if c.password {
+            lines.push("set_password(true)".into());
         }
+    }
+    if c.kind == Kind::Panel && !c.border {
+        lines.push("border = false".into());
     }
     Ok(lines)
 }

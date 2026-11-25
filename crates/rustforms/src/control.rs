@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use crate::{
-    Anchor, Dock, Key, Modifiers, Painter, Point, Rect, TextSystem, app::Clipboard, view::Signal,
+    Anchor, Color, Dock, Key, TextAlign, Modifiers, Painter, Point, Rect, TextSystem, app::Clipboard, view::Signal,
 };
 
 /// Свойства, общие для всех контролов.
@@ -15,6 +15,18 @@ pub struct ControlBase {
     pub anchor: Anchor,
     /// Отличное от `None` отменяет якорь.
     pub dock: Dock,
+    /// `None` — цвет по умолчанию для этого контрола.
+    pub fore_color: Option<Color>,
+    pub back_color: Option<Color>,
+    /// `None` — обычный размер шрифта.
+    pub font_size: Option<f32>,
+    pub bold: bool,
+    /// Подсказка при наведении; пустая не показывается.
+    pub tooltip: String,
+    /// Порядок перехода по Tab; при равенстве — порядок добавления.
+    pub tab_index: i32,
+    /// `None` — выравнивание по умолчанию (у кнопки по центру, у надписи слева).
+    pub text_align: Option<TextAlign>,
 }
 
 impl ControlBase {
@@ -26,6 +38,13 @@ impl ControlBase {
             tab_stop,
             anchor: Anchor::default(),
             dock: Dock::None,
+            fore_color: None,
+            back_color: None,
+            font_size: None,
+            bold: false,
+            tooltip: String::new(),
+            tab_index: 0,
+            text_align: None,
         }
     }
 }
@@ -183,9 +202,9 @@ pub trait ControlImpl: Control + 'static {
         }
     }
 
-    fn on_popup_mouse_move(&mut self, at: Point) {
+    fn on_popup_mouse_move(&mut self, at: Point, cx: &mut EventCx) {
         if let Some(parent) = self.parent_mut() {
-            parent.on_popup_mouse_move(at);
+            parent.on_popup_mouse_move(at, cx);
         }
     }
 
@@ -254,6 +273,44 @@ pub trait ControlExt: ControlImpl + Sized {
 
     fn set_dock(&mut self, dock: Dock) {
         self.base_mut().dock = dock;
+    }
+
+    fn fore_color(mut self, color: Color) -> Self {
+        self.base_mut().fore_color = Some(color);
+        self
+    }
+
+    fn back_color(mut self, color: Color) -> Self {
+        self.base_mut().back_color = Some(color);
+        self
+    }
+
+    fn set_fore_color(&mut self, color: Color) {
+        self.base_mut().fore_color = Some(color);
+    }
+
+    fn set_back_color(&mut self, color: Color) {
+        self.base_mut().back_color = Some(color);
+    }
+
+    fn set_font_size(&mut self, size: f32) {
+        self.base_mut().font_size = Some(size);
+    }
+
+    fn set_bold(&mut self, bold: bool) {
+        self.base_mut().bold = bold;
+    }
+
+    fn set_tooltip(&mut self, text: impl Into<String>) {
+        self.base_mut().tooltip = text.into();
+    }
+
+    fn set_tab_index(&mut self, index: i32) {
+        self.base_mut().tab_index = index;
+    }
+
+    fn set_text_align(&mut self, align: TextAlign) {
+        self.base_mut().text_align = Some(align);
     }
 
     fn bounds(&self) -> Rect {

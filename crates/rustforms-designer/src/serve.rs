@@ -10,7 +10,7 @@ use std::{
 };
 
 use base64::Engine;
-use rustforms_model::{Dock, Event, FormModel, Kind, Side, attach_handler, load, save};
+use rustforms_model::{Align, Dock, Event, FormModel, Kind, Side, attach_handler, load, save};
 use serde_json::{Map, Value, json};
 
 use crate::{document::Document, render::Renderer};
@@ -197,6 +197,8 @@ impl Server {
             "height" => m.form.height = number.map_or(m.form.height, |v| v.clamp(40.0, 4000.0)),
             "back_color" => m.form.back_color = optional,
             "load" => m.form.load = optional,
+            "closing" => m.form.closing = optional,
+            "resize" => m.form.resize = optional,
             _ => known = false,
         })?;
         known.then_some(()).ok_or_else(|| format!("у формы нет свойства `{property}`"))
@@ -247,6 +249,14 @@ impl Server {
                 "fore_color" => c.fore_color = optional,
                 "back_color" => c.back_color = optional,
                 "custom" => c.custom = optional,
+                // 0 или пусто — обычный шрифт.
+                "font_size" => c.font_size = number.filter(|&v| v > 0.0),
+                "bold" => c.bold = flag.unwrap_or(c.bold),
+                "tooltip" => c.tooltip = optional,
+                "tab_index" => c.tab_index = number.map_or(c.tab_index, |v| v as i32),
+                "align" => c.align = Align::ALL.into_iter().find(|a| a.name() == text),
+                "read_only" => c.read_only = flag.unwrap_or(c.read_only),
+                "password" => c.password = flag.unwrap_or(c.password),
                 "dock" => match Dock::ALL.into_iter().find(|d| d.name() == text) {
                     Some(dock) => c.dock = dock,
                     None => known = false,
@@ -293,6 +303,9 @@ impl Server {
                     "name": c.name, "kind": c.kind.name(), "parent": c.parent, "custom": c.custom,
                     "x": c.x, "y": c.y, "width": c.width, "height": c.height,
                     "frame": [x, y, w, h], "text": c.text, "visible": c.visible,
+                    "font_size": c.font_size, "bold": c.bold, "tooltip": c.tooltip,
+                    "tab_index": c.tab_index, "align": c.align.map(Align::name),
+                    "read_only": c.read_only, "password": c.password,
                     "dock": c.dock.name(), "multiline": c.multiline, "items": c.items,
                     "selected": c.selected, "value": c.value, "minimum": c.minimum,
                     "maximum": c.maximum,
@@ -312,6 +325,7 @@ impl Server {
             "form": {
                 "name": form.name, "title": form.title, "width": form.width,
                 "height": form.height, "back_color": form.back_color, "load": form.load,
+                "closing": form.closing, "resize": form.resize,
             },
             "controls": controls,
             "canUndo": self.document.can_undo(),

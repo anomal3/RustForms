@@ -33,10 +33,10 @@ impl ControlImpl for Button {
         let state = p.state();
         let area = p.area();
         let face = match () {
-            _ if !state.enabled => Color::FORM,
+            _ if !state.enabled => p.back_color(Color::FORM),
             _ if state.pressed => Color::FACE_PRESSED,
             _ if state.hovered => Color::FACE_HOVER,
-            _ => Color::FACE,
+            _ => p.back_color(Color::FACE),
         };
         let (border, width) = if state.focused {
             (Color::ACCENT, 2.0)
@@ -45,8 +45,8 @@ impl ControlImpl for Button {
         };
         p.fill_round_rect(area, 4.0, border);
         p.fill_round_rect(area.inset(width), 4.0 - width / 2.0, face);
-        let ink = if state.enabled { Color::TEXT } else { Color::TEXT_DISABLED };
-        p.text(&self.text, area.inset(4.0), ink, Align::Center, 0.0);
+        let (ink, align) = (p.fore_color(Color::TEXT), p.align(Align::Center));
+        p.text(&self.text, area.inset(4.0), ink, align, 0.0);
     }
 
     fn on_mouse_up(&mut self, _at: Point, inside: bool, cx: &mut EventCx) {

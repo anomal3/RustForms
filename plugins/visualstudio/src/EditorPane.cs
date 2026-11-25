@@ -211,6 +211,33 @@ namespace RustForms.VisualStudio
 
         // ---- Toolbox ----
 
+        /// <summary>16×16 для Toolbox: прозрачность он понимает только через цвет-ключ.</summary>
+        private static IntPtr Icon(string kind)
+        {
+            using (var stream = typeof(EditorPane).Assembly.GetManifestResourceStream("icons." + kind + ".png"))
+            {
+                if (stream == null)
+                {
+                    return IntPtr.Zero;
+                }
+                using (var source = new System.Drawing.Bitmap(stream))
+                using (var small = new System.Drawing.Bitmap(source, 16, 16))
+                {
+                    for (var x = 0; x < 16; x++)
+                    {
+                        for (var y = 0; y < 16; y++)
+                        {
+                            var c = small.GetPixel(x, y);
+                            small.SetPixel(x, y, c.A < 110
+                                ? System.Drawing.Color.Magenta
+                                : System.Drawing.Color.FromArgb(c.R, c.G, c.B));
+                        }
+                    }
+                    return small.GetHbitmap();
+                }
+            }
+        }
+
         private static OleDataObject ToolData(string kind)
         {
             var data = new OleDataObject();
@@ -231,6 +258,12 @@ namespace RustForms.VisualStudio
             foreach (var kind in Kinds)
             {
                 var info = new[] { new TBXITEMINFO { bstrText = kind, dwFlags = (uint)__TBXITEMINFOFLAGS.TBXIF_DONTPERSIST } };
+                var bitmap = Icon(kind);
+                if (bitmap != IntPtr.Zero)
+                {
+                    info[0].hBmp = bitmap;
+                    info[0].clrTransparent = 0x00FF00FF; // пурпурный = прозрачно
+                }
                 toolbox.AddItem(ToolData(kind), info, ToolboxTab);
             }
             toolbox.UpdateToolboxUI();

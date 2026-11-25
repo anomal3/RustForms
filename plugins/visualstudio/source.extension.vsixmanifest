@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
   <Metadata>
-    <Identity Id="RustForms.VisualStudio.7d1f3b52" Version="0.2.0" Language="en-US" Publisher="RustForms" />
+    <Identity Id="RustForms.VisualStudio.7d1f3b52" Version="0.4.0" Language="en-US" Publisher="RustForms" />
     <DisplayName>RustForms</DisplayName>
     <Description xml:space="preserve">Дизайнер форм RustForms: .rfrm открывается во вкладке, элементы — в Toolbox, свойства — в Properties.</Description>
   </Metadata>

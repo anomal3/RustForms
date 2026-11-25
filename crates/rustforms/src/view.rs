@@ -1,8 +1,8 @@
-use std::{cell::RefCell, ops::Deref, rc::Rc};
+use std::{any::Any, cell::Cell, cell::RefCell, ops::Deref, rc::Rc};
 
 use crate::{
-    AnyControl, CheckBox, ComboBox, Container, ControlId, ControlImpl, Handle, ListBox,
-    MenuStrip, RadioButton, TextBox, Ui,
+    AnyControl, CheckBox, ComboBox, Container, ControlId, ControlImpl, Handle, ListBox, MenuStrip,
+    Modifiers, RadioButton, TextBox, Ui,
 };
 
 /// [`TextBox`] и всё, что от него «унаследовано».
@@ -10,10 +10,11 @@ pub trait RaisesTextChanged {}
 impl RaisesTextChanged for TextBox {}
 impl<T: Deref> RaisesTextChanged for T where T::Target: RaisesTextChanged {}
 
-/// [`MenuStrip`] и всё, что от него «унаследовано».
-pub trait RaisesItemClicked {}
-impl RaisesItemClicked for MenuStrip {}
-impl<T: Deref> RaisesItemClicked for T where T::Target: RaisesItemClicked {}
+/// [`CheckBox`], [`RadioButton`] и всё, что от них «унаследовано».
+pub trait RaisesCheckedChanged {}
+impl RaisesCheckedChanged for CheckBox {}
+impl RaisesCheckedChanged for RadioButton {}
+impl<T: Deref> RaisesCheckedChanged for T where T::Target: RaisesCheckedChanged {}
 
 /// [`ListBox`], [`ComboBox`] и всё, что от них «унаследовано».
 pub trait RaisesSelectedChanged {}
@@ -21,11 +22,10 @@ impl RaisesSelectedChanged for ListBox {}
 impl RaisesSelectedChanged for ComboBox {}
 impl<T: Deref> RaisesSelectedChanged for T where T::Target: RaisesSelectedChanged {}
 
-/// [`CheckBox`] и всё, что от него «унаследовано».
-pub trait RaisesCheckedChanged {}
-impl RaisesCheckedChanged for CheckBox {}
-impl RaisesCheckedChanged for RadioButton {}
-impl<T: Deref> RaisesCheckedChanged for T where T::Target: RaisesCheckedChanged {}
+/// [`MenuStrip`] и всё, что от него «унаследовано».
+pub trait RaisesItemClicked {}
+impl RaisesItemClicked for MenuStrip {}
+impl<T: Deref> RaisesItemClicked for T where T::Target: RaisesItemClicked {}
 
 #[derive(Clone, Copy, Debug)]
 pub struct ClickArgs {
@@ -58,8 +58,75 @@ pub struct MenuItemArgs {
     pub item: String,
 }
 
+/// Мышь: координаты от левого верхнего угла контрола.
+#[derive(Clone, Copy, Debug)]
+pub struct MouseArgs {
+    pub sender: ControlId,
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Clone, Debug)]
+pub struct KeyArgs {
+    pub sender: ControlId,
+    /// Клавиша по её месту на клавиатуре, не зависит от раскладки: `"A"`, `"1"`,
+    /// `"Enter"`, `"Escape"`, `"ArrowUp"`, `"F5"`.
+    pub key: String,
+    pub modifiers: Modifiers,
+}
+
+/// Получение и потеря фокуса.
+#[derive(Clone, Copy, Debug)]
+pub struct FocusArgs {
+    pub sender: ControlId,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct LoadArgs;
+
+#[derive(Clone, Copy, Debug)]
+pub struct ResizeArgs {
+    pub width: f32,
+    pub height: f32,
+}
+
+/// Окно собираются закрыть.
+#[derive(Debug, Default)]
+pub struct ClosingArgs {
+    cancelled: Cell<bool>,
+}
+
+impl ClosingArgs {
+    /// Оставить окно открытым.
+    pub fn cancel(&self) {
+        self.cancelled.set(true);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.get()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EventKind {
+    Load,
+    Closing,
+    Resize,
+    Click,
+    DoubleClick,
+    TextChanged,
+    CheckedChanged,
+    SelectedChanged,
+    ItemClicked,
+    MouseEnter,
+    MouseLeave,
+    MouseDown,
+    MouseUp,
+    KeyDown,
+    KeyUp,
+    GotFocus,
+    LostFocus,
+}
 
 /// Что произошло с контролом; из этого строятся аргументы обработчиков.
 #[derive(Clone, Debug)]
@@ -71,7 +138,7 @@ pub(crate) enum Signal {
     ItemClicked(String),
 }
 
-type Handler<S, A> = Box<dyn FnMut(&mut S, &mut Ui, &A)>;
+type Handler<S> = Box<dyn FnMut(&mut S, &mut Ui, &dyn Any)>;
 type Getter<S> = Box<dyn Fn(&mut S) -> &mut (dyn AnyControl + 'static)>;
 
 pub(crate) struct Node<S> {
@@ -91,29 +158,33 @@ fn getter<S>(get: impl Fn(&mut S) -> &mut (dyn AnyControl + 'static) + 'static) 
 /// `self.label1.set_text("...")`. Обработчики — обычные методы вида
 /// `fn button1_click(&mut self, ui: &mut Ui, e: &ClickArgs)`.
 ///
-/// События возникают только от действий пользователя: изменение свойства из кода их не вызывает.
+/// События изменения (`text_changed` и подобные) возникают только от действий
+/// пользователя: изменение свойства из кода их не вызывает.
 pub struct View<S> {
     pub(crate) nodes: Vec<Node<S>>,
-    load: Vec<Handler<S, LoadArgs>>,
-    click: Vec<(ControlId, Handler<S, ClickArgs>)>,
-    text_changed: Vec<(ControlId, Handler<S, TextChangedArgs>)>,
-    checked_changed: Vec<(ControlId, Handler<S, CheckedChangedArgs>)>,
-    selected_changed: Vec<(ControlId, Handler<S, SelectedChangedArgs>)>,
-    item_clicked: Vec<(ControlId, Handler<S, MenuItemArgs>)>,
+    /// `None` вместо номера — событие самой формы.
+    handlers: Vec<(Option<ControlId>, EventKind, Handler<S>)>,
 }
 
 impl<S> Default for View<S> {
     fn default() -> Self {
-        Self {
-            nodes: Vec::new(),
-            load: Vec::new(),
-            click: Vec::new(),
-            text_changed: Vec::new(),
-            checked_changed: Vec::new(),
-            selected_changed: Vec::new(),
-            item_clicked: Vec::new(),
-        }
+        Self { nodes: Vec::new(), handlers: Vec::new() }
     }
+}
+
+macro_rules! control_events {
+    ($($(#[$doc:meta])* $method:ident $(<$bound:ident>)? => $kind:ident, $args:ty;)*) => {
+        $(
+            $(#[$doc])*
+            pub fn $method<T $(: $bound)?>(
+                &mut self,
+                control: Handle<T>,
+                handler: impl FnMut(&mut S, &mut Ui, &$args) + 'static,
+            ) {
+                self.subscribe(Some(control.id()), EventKind::$kind, handler);
+            }
+        )*
+    };
 }
 
 impl<S: 'static> View<S> {
@@ -150,48 +221,47 @@ impl<S: 'static> View<S> {
         handle
     }
 
+    fn subscribe<A: 'static>(
+        &mut self,
+        sender: Option<ControlId>,
+        kind: EventKind,
+        mut handler: impl FnMut(&mut S, &mut Ui, &A) + 'static,
+    ) {
+        let erased = Box::new(move |state: &mut S, ui: &mut Ui, args: &dyn Any| {
+            handler(state, ui, args.downcast_ref().expect("вид события задаёт тип аргументов"));
+        });
+        self.handlers.push((sender, kind, erased));
+    }
+
     pub fn on_load(&mut self, handler: impl FnMut(&mut S, &mut Ui, &LoadArgs) + 'static) {
-        self.load.push(Box::new(handler));
+        self.subscribe(None, EventKind::Load, handler);
     }
 
-    pub fn on_click<T>(
-        &mut self,
-        control: Handle<T>,
-        handler: impl FnMut(&mut S, &mut Ui, &ClickArgs) + 'static,
-    ) {
-        self.click.push((control.id(), Box::new(handler)));
+    /// Перед закрытием окна; `e.cancel()` оставляет его открытым.
+    pub fn on_closing(&mut self, handler: impl FnMut(&mut S, &mut Ui, &ClosingArgs) + 'static) {
+        self.subscribe(None, EventKind::Closing, handler);
     }
 
-    pub fn on_text_changed<T: RaisesTextChanged>(
-        &mut self,
-        control: Handle<T>,
-        handler: impl FnMut(&mut S, &mut Ui, &TextChangedArgs) + 'static,
-    ) {
-        self.text_changed.push((control.id(), Box::new(handler)));
+    pub fn on_resize(&mut self, handler: impl FnMut(&mut S, &mut Ui, &ResizeArgs) + 'static) {
+        self.subscribe(None, EventKind::Resize, handler);
     }
 
-    pub fn on_checked_changed<T: RaisesCheckedChanged>(
-        &mut self,
-        control: Handle<T>,
-        handler: impl FnMut(&mut S, &mut Ui, &CheckedChangedArgs) + 'static,
-    ) {
-        self.checked_changed.push((control.id(), Box::new(handler)));
-    }
-
-    pub fn on_selected_changed<T: RaisesSelectedChanged>(
-        &mut self,
-        control: Handle<T>,
-        handler: impl FnMut(&mut S, &mut Ui, &SelectedChangedArgs) + 'static,
-    ) {
-        self.selected_changed.push((control.id(), Box::new(handler)));
-    }
-
-    pub fn on_item_clicked<T: RaisesItemClicked>(
-        &mut self,
-        control: Handle<T>,
-        handler: impl FnMut(&mut S, &mut Ui, &MenuItemArgs) + 'static,
-    ) {
-        self.item_clicked.push((control.id(), Box::new(handler)));
+    control_events! {
+        on_click => Click, ClickArgs;
+        on_double_click => DoubleClick, MouseArgs;
+        on_text_changed<RaisesTextChanged> => TextChanged, TextChangedArgs;
+        on_checked_changed<RaisesCheckedChanged> => CheckedChanged, CheckedChangedArgs;
+        on_selected_changed<RaisesSelectedChanged> => SelectedChanged, SelectedChangedArgs;
+        on_item_clicked<RaisesItemClicked> => ItemClicked, MenuItemArgs;
+        on_mouse_enter => MouseEnter, MouseArgs;
+        on_mouse_leave => MouseLeave, MouseArgs;
+        on_mouse_down => MouseDown, MouseArgs;
+        on_mouse_up => MouseUp, MouseArgs;
+        /// Приходит контролу с фокусом.
+        on_key_down => KeyDown, KeyArgs;
+        on_key_up => KeyUp, KeyArgs;
+        on_got_focus => GotFocus, FocusArgs;
+        on_lost_focus => LostFocus, FocusArgs;
     }
 
     /// Подключает базовую форму: `part` достаёт её из производной, а `build` добавляет
@@ -201,20 +271,6 @@ impl<S: 'static> View<S> {
         part: fn(&mut S) -> &mut B,
         build: impl FnOnce(&mut View<B>) -> R,
     ) -> R {
-        fn adapt<S: 'static, B: 'static, A: 'static>(
-            part: fn(&mut S) -> &mut B,
-            handler: Handler<B, A>,
-        ) -> Handler<S, A> {
-            let handler = Rc::new(RefCell::new(handler));
-            Box::new(move |state, ui, args| (handler.borrow_mut())(part(state), ui, args))
-        }
-        fn adapt_all<S: 'static, B: 'static, A: 'static>(
-            part: fn(&mut S) -> &mut B,
-            list: Vec<(ControlId, Handler<B, A>)>,
-        ) -> impl Iterator<Item = (ControlId, Handler<S, A>)> {
-            list.into_iter().map(move |(id, h)| (id, adapt(part, h)))
-        }
-
         let mut inner = View::<B>::new();
         let result = build(&mut inner);
         self.nodes.extend(inner.nodes.into_iter().map(|node| {
@@ -225,50 +281,58 @@ impl<S: 'static> View<S> {
                 get: getter(move |state| get(part(state))),
             }
         }));
-        self.load.extend(inner.load.into_iter().map(|h| adapt(part, h)));
-        self.click.extend(adapt_all(part, inner.click));
-        self.text_changed.extend(adapt_all(part, inner.text_changed));
-        self.checked_changed.extend(adapt_all(part, inner.checked_changed));
-        self.selected_changed.extend(adapt_all(part, inner.selected_changed));
-        self.item_clicked.extend(adapt_all(part, inner.item_clicked));
+        self.handlers.extend(inner.handlers.into_iter().map(|(sender, kind, handler)| {
+            let handler = Rc::new(RefCell::new(handler));
+            let adapted: Handler<S> = Box::new(move |state, ui, args| {
+                (handler.borrow_mut())(part(state), ui, args)
+            });
+            (sender, kind, adapted)
+        }));
         result
     }
 
-    pub(crate) fn load(&mut self, state: &mut S, ui: &mut Ui) {
-        for handler in &mut self.load {
-            handler(state, ui, &LoadArgs);
+    pub(crate) fn emit(
+        &mut self,
+        sender: Option<ControlId>,
+        kind: EventKind,
+        args: &dyn Any,
+        state: &mut S,
+        ui: &mut Ui,
+    ) {
+        for (id, of, handler) in &mut self.handlers {
+            if *id == sender && *of == kind {
+                handler(state, ui, args);
+            }
         }
     }
 
-    pub(crate) fn dispatch(&mut self, sender: ControlId, signal: Signal, state: &mut S, ui: &mut Ui) {
-        fn call<S, A>(
-            list: &mut [(ControlId, Handler<S, A>)],
-            sender: ControlId,
-            args: A,
-            state: &mut S,
-            ui: &mut Ui,
-        ) {
-            for (_, handler) in list.iter_mut().filter(|(id, _)| *id == sender) {
-                handler(state, ui, &args);
-            }
-        }
+    pub(crate) fn dispatch(
+        &mut self,
+        sender: ControlId,
+        signal: Signal,
+        state: &mut S,
+        ui: &mut Ui,
+    ) {
+        let from = Some(sender);
         match signal {
-            Signal::Click => call(&mut self.click, sender, ClickArgs { sender }, state, ui),
+            Signal::Click => {
+                self.emit(from, EventKind::Click, &ClickArgs { sender }, state, ui)
+            }
             Signal::TextChanged(text) => {
                 let args = TextChangedArgs { sender, text };
-                call(&mut self.text_changed, sender, args, state, ui)
+                self.emit(from, EventKind::TextChanged, &args, state, ui)
             }
             Signal::CheckedChanged(checked) => {
                 let args = CheckedChangedArgs { sender, checked };
-                call(&mut self.checked_changed, sender, args, state, ui)
+                self.emit(from, EventKind::CheckedChanged, &args, state, ui)
             }
             Signal::SelectedChanged(index, text) => {
                 let args = SelectedChangedArgs { sender, index, text };
-                call(&mut self.selected_changed, sender, args, state, ui)
+                self.emit(from, EventKind::SelectedChanged, &args, state, ui)
             }
             Signal::ItemClicked(item) => {
                 let args = MenuItemArgs { sender, item };
-                call(&mut self.item_clicked, sender, args, state, ui)
+                self.emit(from, EventKind::ItemClicked, &args, state, ui)
             }
         }
     }

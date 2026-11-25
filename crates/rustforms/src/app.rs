@@ -1,9 +1,15 @@
 use tiny_skia::Pixmap;
 
+use std::time::{Duration, Instant};
+
 use crate::{
-    Dock, AnyControl, ControlId, EventCx, Key, Modifiers, Painter, Point, Rect, TextSystem, Ui, View,
+    Align, ClosingArgs, Color, FocusArgs, FontStyle, KeyArgs, LoadArgs, MouseArgs, ResizeArgs,
+    paint::FONT_SIZE, view::EventKind, Dock, AnyControl, ControlId, EventCx, Key, Modifiers, Painter, Point, Rect, TextSystem, Ui, View,
     VisualState, layout, view::Signal,
 };
+
+const TOOLTIP_DELAY: Duration = Duration::from_millis(600);
+const DOUBLE_CLICK: Duration = Duration::from_millis(500);
 
 /// Системный буфер обмена; без него (тесты, нет доступа) — внутренний.
 pub(crate) struct Clipboard {
@@ -45,13 +51,24 @@ pub struct Application<S> {
     capture: Option<usize>,
     mouse: Point,
     loaded: bool,
+    /// Когда мышь пришла на нынешний контрол: от этого отсчитывается подсказка.
+    hover_since: Option<Instant>,
+    tooltip: Option<(usize, Point)>,
+    last_click: Option<(usize, Instant, Point)>,
+    /// Размер окна, о котором форме уже сообщили.
+    size: (f32, f32),
     /// Размер родителя каждого контрола при прошлом размещении: якоря считают от разницы.
     parent_sizes: Vec<(f32, f32)>,
 }
 
 impl<S: 'static> Application<S> {
     pub fn new(ui: Ui, state: S, view: View<S>) -> Self {
+        let size = (ui.width, ui.height);
         let mut app = Self {
+            size,
+            hover_since: None,
+            tooltip: None,
+            last_click: None,
             ui,
             state,
             view,
@@ -119,6 +136,8 @@ impl<S: 'static> Application<S> {
         (self.ui, self.state, self.view) = (ui, state, view);
         (self.focus, self.hover, self.capture) = (None, None, None);
         self.loaded = false;
+        self.size = (self.ui.width, self.ui.height);
+        (self.tooltip, self.hover_since, self.last_click) = (None, None, None);
         self.reset_layout();
     }
 
@@ -130,8 +149,99 @@ impl<S: 'static> Application<S> {
     pub fn load(&mut self) {
         if !self.loaded {
             self.loaded = true;
-            self.view.load(&mut self.state, &mut self.ui);
+            self.view.emit(None, EventKind::Load, &LoadArgs, &mut self.state, &mut self.ui);
             self.layout();
+        }
+    }
+
+    /// Спрашивает форму, можно ли закрыться (событие `closing`).
+    pub fn try_close(&mut self) -> bool {
+        let args = ClosingArgs::default();
+        self.view.emit(None, EventKind::Closing, &args, &mut self.state, &mut self.ui);
+        if args.is_cancelled() {
+            self.ui.close_requested = false;
+            self.ui.accepted = false;
+            self.layout();
+        }
+        !args.is_cancelled()
+    }
+
+    /// Окно изменило размер (`ui.width`/`ui.height` уже новые).
+    pub fn resized(&mut self) {
+        self.layout();
+        let size = (self.ui.width, self.ui.height);
+        if std::mem::replace(&mut self.size, size) != size {
+            let args = ResizeArgs { width: size.0, height: size.1 };
+            self.view.emit(None, EventKind::Resize, &args, &mut self.state, &mut self.ui);
+            self.layout();
+        }
+    }
+
+    fn emit<A: 'static>(&mut self, index: usize, kind: EventKind, args: impl FnOnce(ControlId) -> A) {
+        let id = self.view.nodes[index].id;
+        let args = args(id);
+        self.view.emit(Some(id), kind, &args, &mut self.state, &mut self.ui);
+        self.layout();
+    }
+
+    fn emit_mouse(&mut self, index: usize, kind: EventKind) {
+        let (rect, _) = self.placement(index);
+        let (x, y) = (self.mouse.x - rect.x, self.mouse.y - rect.y);
+        self.emit(index, kind, |sender| MouseArgs { sender, x, y });
+    }
+
+    fn set_hover(&mut self, hover: Option<usize>) {
+        if self.hover == hover {
+            return;
+        }
+        let old = std::mem::replace(&mut self.hover, hover);
+        self.tooltip = None;
+        self.hover_since = hover.map(|_| Instant::now());
+        if let Some(old) = old {
+            self.emit_mouse(old, EventKind::MouseLeave);
+        }
+        if let Some(new) = hover {
+            self.emit_mouse(new, EventKind::MouseEnter);
+        }
+    }
+
+    fn set_focus(&mut self, focus: Option<usize>) {
+        if self.focus == focus {
+            return;
+        }
+        let old = std::mem::replace(&mut self.focus, focus);
+        if let Some(old) = old {
+            self.emit(old, EventKind::LostFocus, |sender| FocusArgs { sender });
+        }
+        if let Some(new) = focus {
+            self.emit(new, EventKind::GotFocus, |sender| FocusArgs { sender });
+        }
+    }
+
+    /// Когда пора показать подсказку; `None` — ждать нечего.
+    pub fn tooltip_deadline(&mut self) -> Option<Instant> {
+        let index = self.hover?;
+        if self.tooltip.is_some() || self.control(index).base().tooltip.is_empty() {
+            return None;
+        }
+        Some(self.hover_since? + TOOLTIP_DELAY)
+    }
+
+    /// Показывает подсказку, если её время пришло; возвращает, нужна ли перерисовка.
+    pub fn tick(&mut self, now: Instant) -> bool {
+        let due = self.tooltip_deadline().is_some_and(|at| now >= at);
+        if due {
+            self.tooltip = self.hover.map(|index| (index, self.mouse));
+        }
+        due
+    }
+
+    /// Клавиша по месту на клавиатуре — для событий `key_down` и `key_up`.
+    pub fn raw_key(&mut self, key: &str, modifiers: Modifiers, pressed: bool) {
+        if let Some(index) = self.focus_target() {
+            let kind = if pressed { EventKind::KeyDown } else { EventKind::KeyUp };
+            let key = key.to_owned();
+            self.emit(index, kind, |sender| KeyArgs { sender, key, modifiers });
         }
     }
 
@@ -208,6 +318,7 @@ impl<S: 'static> Application<S> {
             Some(popup) if popup.contains(self.mouse) => (popup.width, popup.height),
             _ => (rect.width, rect.height),
         };
+        self.text.style = self.font_of(index);
         let node = &self.view.nodes[index];
         let id = node.id;
         let mut signals: Vec<Signal> = Vec::new();
@@ -243,6 +354,62 @@ impl<S: 'static> Application<S> {
         }
         // Обработчик мог изменить размеры или видимость.
         self.layout();
+    }
+
+    fn font_of(&mut self, index: usize) -> FontStyle {
+        let base = self.control(index).base();
+        FontStyle { size: base.font_size.unwrap_or(FONT_SIZE), bold: base.bold }
+    }
+
+    /// Рисует контрол или его окошко с его цветами и шрифтом.
+    #[allow(clippy::too_many_arguments)]
+    fn paint_control(
+        &mut self,
+        index: usize,
+        pixmap: &mut Pixmap,
+        scale: f32,
+        frame: Rect,
+        clip: Rect,
+        state: VisualState,
+        popup: bool,
+    ) {
+        self.text.style = self.font_of(index);
+        let base = self.control(index).base();
+        let (fore, back, align) = (base.fore_color, base.back_color, base.text_align);
+        let mut painter =
+            Painter { pixmap, text: &mut self.text, scale, frame, clip, state, fore, back, align };
+        let control = (self.view.nodes[index].get)(&mut self.state);
+        if popup {
+            control.on_paint_popup(&mut painter);
+        } else {
+            control.on_paint(&mut painter);
+        }
+        self.text.style = FontStyle::default();
+    }
+
+    fn paint_tooltip(&mut self, pixmap: &mut Pixmap, scale: f32, window: Rect) {
+        let Some((index, at)) = self.tooltip else { return };
+        let text = self.control(index).base().tooltip.clone();
+        let width = self.text.width(&text).ceil() + 14.0;
+        let x = at.x.min(window.width - width).max(0.0);
+        let below = at.y + 20.0;
+        let y = if below + 26.0 > window.height { at.y - 30.0 } else { below };
+        let frame = Rect::new(x, y, width, 24.0);
+        let mut painter = Painter {
+            pixmap,
+            text: &mut self.text,
+            scale,
+            frame,
+            clip: frame.intersect(&window),
+            state: VisualState { enabled: true, ..VisualState::default() },
+            fore: None,
+            back: None,
+            align: None,
+        };
+        let area = painter.area();
+        painter.fill_rect(area, Color::rgb(255, 255, 225));
+        painter.stroke_rect(area, Color::BORDER, 1.0);
+        painter.text(&text, area, Color::TEXT, Align::Center, 0.0);
     }
 
     /// Контрол с открытым всплывающим окошком.
@@ -297,11 +464,12 @@ impl<S: 'static> Application<S> {
         self.layout();
         self.mouse = at;
         if let Some(owner) = self.popup_under_mouse() {
-            self.hover = None;
-            self.with_control(owner, |c, local, _| c.on_popup_mouse_move(local));
+            self.set_hover(None);
+            self.with_control(owner, |c, local, cx| c.on_popup_mouse_move(local, cx));
             return;
         }
-        self.hover = self.hit_test(at);
+        let hover = self.hit_test(at);
+        self.set_hover(hover);
         if let Some(index) = self.hover.filter(|&i| self.capture.is_none() && self.is_active(i)) {
             self.with_control(index, |c, local, cx| c.on_mouse_move(local, cx));
         }
@@ -311,10 +479,12 @@ impl<S: 'static> Application<S> {
     }
 
     pub fn mouse_leave(&mut self) {
-        self.hover = None;
+        self.set_hover(None);
     }
 
     pub fn mouse_down(&mut self, mods: Modifiers) {
+        self.tooltip = None;
+        self.hover_since = None;
         if let Some(owner) = self.popup_owner() {
             if self.popup_under_mouse().is_some() {
                 self.with_control(owner, |c, local, cx| c.on_popup_mouse_down(local, cx));
@@ -330,15 +500,30 @@ impl<S: 'static> Application<S> {
             return;
         }
         if self.can_focus(index) {
-            self.focus = Some(index);
+            self.set_focus(Some(index));
         }
         self.capture = Some(index);
+        self.emit_mouse(index, EventKind::MouseDown);
         self.with_control(index, |c, local, cx| c.on_mouse_down(local, mods, cx));
+        // Второе нажатие на тот же контрол вскоре и рядом — двойной клик.
+        let now = Instant::now();
+        let again = self.last_click.take().is_some_and(|(last, at, point)| {
+            last == index
+                && now - at < DOUBLE_CLICK
+                && (point.x - self.mouse.x).abs() < 4.0
+                && (point.y - self.mouse.y).abs() < 4.0
+        });
+        if again {
+            self.emit_mouse(index, EventKind::DoubleClick);
+        } else {
+            self.last_click = Some((index, now, self.mouse));
+        }
     }
 
     pub fn mouse_up(&mut self) {
         let Some(index) = self.capture.take() else { return };
         let inside = self.hit_test(self.mouse) == Some(index);
+        self.emit_mouse(index, EventKind::MouseUp);
         self.with_control(index, |c, local, cx| c.on_mouse_up(local, inside, cx));
     }
 
@@ -370,8 +555,13 @@ impl<S: 'static> Application<S> {
     }
 
     fn move_focus(&mut self, backwards: bool) {
-        let order: Vec<usize> =
+        let mut order: Vec<usize> =
             (0..self.view.nodes.len()).filter(|&i| self.can_focus(i)).collect();
+        // Устойчивая сортировка: при равных номерах остаётся порядок добавления.
+        let mut keys: Vec<(i32, usize)> =
+            order.iter().map(|&i| (self.control(i).base().tab_index, i)).collect();
+        keys.sort();
+        order = keys.into_iter().map(|k| k.1).collect();
         if order.is_empty() {
             return;
         }
@@ -382,7 +572,7 @@ impl<S: 'static> Application<S> {
             (None, false) => 0,
             (None, true) => order.len() - 1,
         };
-        self.focus = Some(order[next]);
+        self.set_focus(Some(order[next]));
     }
 
     /// Рисует форму. `scale` — масштаб экрана (1.0 = 96 DPI).
@@ -412,15 +602,7 @@ impl<S: 'static> Application<S> {
                 pressed: hovered && self.capture == Some(index),
                 enabled: self.is_active(index),
             };
-            let mut painter = Painter {
-                pixmap: &mut *pixmap,
-                text: &mut self.text,
-                scale,
-                frame,
-                clip,
-                state,
-            };
-            (self.view.nodes[index].get)(&mut self.state).on_paint(&mut painter);
+            self.paint_control(index, pixmap, scale, frame, clip, state, false);
         }
         // Всплывающее окошко — поверх всех контролов.
         if let Some(owner) = self.popup_owner()
@@ -429,10 +611,9 @@ impl<S: 'static> Application<S> {
             let clip = frame.intersect(&window);
             if !clip.is_empty() {
                 let state = VisualState { enabled: true, ..VisualState::default() };
-                let mut painter =
-                    Painter { pixmap, text: &mut self.text, scale, frame, clip, state };
-                (self.view.nodes[owner].get)(&mut self.state).on_paint_popup(&mut painter);
+                self.paint_control(owner, pixmap, scale, frame, clip, state, true);
             }
         }
+        self.paint_tooltip(pixmap, scale, window);
     }
 }

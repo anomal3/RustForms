@@ -15,7 +15,19 @@ use std::{
     process::ExitCode,
 };
 
-use rustforms_model::{Error, Event, attach_handler, load, new_form, new_project, save};
+use rustforms_model::{Error, Event, Library, attach_handler, load, new_form, new_project, save};
+
+/// Новый проект: библиотека по пути, если дизайнер собран здесь же, иначе из репозитория.
+pub fn create_project(dir: &Path) -> Result<PathBuf, Error> {
+    let local = Path::new(env!("CARGO_MANIFEST_DIR")).with_file_name("rustforms");
+    let tag = format!("v{}", env!("CARGO_PKG_VERSION"));
+    let library = if local.join("Cargo.toml").is_file() {
+        Library::Path(&local)
+    } else {
+        Library::Git { url: "https://github.com/anomal3/RustForms.git", tag: &tag }
+    };
+    new_project(dir, library)
+}
 
 const USAGE: &str = "rustforms-designer [--ide] [форма.rfrm]
 rustforms-designer project <папка>
@@ -26,9 +38,8 @@ rustforms-designer handler <форма.rfrm> [контрол] [событие]";
 fn run(args: &[&str]) -> Result<String, Error> {
     match args {
         ["project", dir] => {
-            let library = Path::new(env!("CARGO_MANIFEST_DIR")).with_file_name("rustforms");
             let dir = std::path::absolute(dir).map_err(|e| Error(e.to_string()))?;
-            Ok(new_project(&dir, &library)?.display().to_string())
+            Ok(create_project(&dir)?.display().to_string())
         }
         ["new", dir, name] => Ok(new_form(Path::new(dir), name)?.display().to_string()),
         ["generate", file] => {

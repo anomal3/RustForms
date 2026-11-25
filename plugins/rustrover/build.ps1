@@ -1,5 +1,7 @@
 ﻿# Собирает дизайнер и плагин RustRover. Нужна только папка самой IDE: её JDK и библиотеки.
 param(
+    # Переносимая сборка для релиза: дизайнер вкладывается в плагин, путей этой машины нет.
+    [switch]$Release,
     [string]$Ide = $(if ($env:RUSTROVER_HOME) { $env:RUSTROVER_HOME }
                      else { "$env:USERPROFILE\Downloads\RustRover-2026.3.1.1.win" })
 )
@@ -17,7 +19,15 @@ if (Test-Path $exe) {
     Move-Item $exe "$root\target\release\rustforms-designer.$PID.old" -ErrorAction SilentlyContinue
 }
 Push-Location $root
-cargo build --release -p rustforms-designer
+if ($Release) {
+    # Статическая CRT — чтобы не требовался распространяемый пакет Visual C++;
+    # пути домашней папки вычищаются из сообщений внутри exe.
+    $env:RUSTFLAGS = "-C target-feature=+crt-static --remap-path-prefix=$env:USERPROFILE=~ --remap-path-prefix=$root=rustforms"
+    cargo build --release -p rustforms-designer --target-dir "$root\target\dist"
+    $env:RUSTFLAGS = $null
+} else {
+    cargo build --release -p rustforms-designer
+}
 $failed = $LASTEXITCODE
 Pop-Location
 if ($failed) { throw 'Дизайнер не собрался' }
@@ -26,7 +36,11 @@ $build = "$PSScriptRoot\build"
 if (Test-Path $build) { Remove-Item $build -Recurse -Force }
 New-Item -ItemType Directory "$build\classes", "$build\dist\rustforms\lib" | Out-Null
 Copy-Item "$PSScriptRoot\resources\*" "$build\classes" -Recurse
-[IO.File]::WriteAllText("$build\classes\designer.path", "$root\target\release\rustforms-designer.exe", $utf8)
+New-Item -ItemType Directory "$build\classes\icons" | Out-Null
+Copy-Item "$root\crates\rustforms-designer\icons\*.png" "$build\classes\icons"
+if (-not $Release) {
+    [IO.File]::WriteAllText("$build\classes\designer.path", "$root\target\release\rustforms-designer.exe", $utf8)
+}
 
 # Список файлов и classpath передаются через файл: так не упереться в длину командной строки.
 $jars = Get-ChildItem "$Ide\lib", "$Ide\modules" -Recurse -Filter *.jar
@@ -52,5 +66,12 @@ function New-Zip([string]$Folder, [string]$Target) {
     } finally { $zip.Dispose() }
 }
 New-Zip "$build\classes" "$build\dist\rustforms\lib\rustforms.jar"
-New-Zip "$build\dist" "$build\rustforms-rustrover.zip"
-Write-Host "Готово: $build\rustforms-rustrover.zip"
+$name = 'rustforms-rustrover.zip'
+if ($Release) {
+    New-Item -ItemType Directory "$build\dist\rustforms\bin" | Out-Null
+    Copy-Item "$root\target\dist\release\rustforms-designer.exe" "$build\dist\rustforms\bin"
+    $version = ([xml](Get-Content "$PSScriptRoot\resources\META-INF\plugin.xml" -Raw -Encoding UTF8)).'idea-plugin'.version
+    $name = "rustforms-rustrover-$version-windows-x64.zip"
+}
+New-Zip "$build\dist" "$build\$name"
+Write-Host "Готово: $build\$name"

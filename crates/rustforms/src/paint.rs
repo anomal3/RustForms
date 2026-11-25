@@ -1,4 +1,4 @@
-use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, SwashCache, Wrap};
+use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, SwashCache, Weight, Wrap};
 use tiny_skia::{FillRule, Mask, Paint, PathBuilder, Pixmap, Transform};
 
 use crate::{Color, Rect};
@@ -15,21 +15,50 @@ const FAMILY: Family<'static> = Family::SansSerif;
 pub struct TextSystem {
     fonts: FontSystem,
     cache: SwashCache,
+    /// Шрифт контрола, с которым сейчас работают: им измеряется и рисуется текст.
+    pub(crate) style: FontStyle,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FontStyle {
+    pub size: f32,
+    pub bold: bool,
+}
+
+impl Default for FontStyle {
+    fn default() -> Self {
+        Self { size: FONT_SIZE, bold: false }
+    }
+}
+
+/// Горизонтальное выравнивание, заданное свойством контрола.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextAlign {
+    Left,
+    Center,
+    Right,
 }
 
 impl TextSystem {
     pub(crate) fn new() -> Self {
-        Self { fonts: FontSystem::new(), cache: SwashCache::new() }
+        Self { fonts: FontSystem::new(), cache: SwashCache::new(), style: FontStyle::default() }
     }
 
     fn layout(&mut self, text: &str, scale: f32) -> Buffer {
-        let metrics = Metrics::new(FONT_SIZE * scale, LINE_HEIGHT * scale);
+        let metrics = Metrics::new(self.style.size * scale, self.line_height() * scale);
         let mut buffer = Buffer::new(&mut self.fonts, metrics);
         buffer.set_wrap(Wrap::None);
         buffer.set_size(None, None);
-        buffer.set_text(text, &Attrs::new().family(FAMILY), Shaping::Advanced, None);
+        let weight = if self.style.bold { Weight::BOLD } else { Weight::NORMAL };
+        let attrs = Attrs::new().family(FAMILY).weight(weight);
+        buffer.set_text(text, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut self.fonts, false);
         buffer
+    }
+
+    /// Высота строки текущего шрифта.
+    pub fn line_height(&self) -> f32 {
+        (self.style.size * LINE_HEIGHT / FONT_SIZE).round()
     }
 
     /// Горизонтальные позиции курсора: пары (байтовый индекс, x) по всем границам символов.
@@ -64,6 +93,7 @@ impl TextSystem {
 pub enum Align {
     Left,
     Center,
+    Right,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -84,6 +114,9 @@ pub struct Painter<'a> {
     /// Видимая часть в окне.
     pub(crate) clip: Rect,
     pub(crate) state: VisualState,
+    pub(crate) fore: Option<Color>,
+    pub(crate) back: Option<Color>,
+    pub(crate) align: Option<TextAlign>,
 }
 
 impl Painter<'_> {
@@ -94,6 +127,26 @@ impl Painter<'_> {
     /// Прямоугольник всего контрола в его координатах.
     pub fn area(&self) -> Rect {
         Rect::new(0.0, 0.0, self.frame.width, self.frame.height)
+    }
+
+    /// Цвет текста: заданный контролу или `default`; у недоступного — серый.
+    pub fn fore_color(&self, default: Color) -> Color {
+        if self.state.enabled { self.fore.unwrap_or(default) } else { Color::TEXT_DISABLED }
+    }
+
+    /// Цвет фона: заданный контролу или `default`.
+    pub fn back_color(&self, default: Color) -> Color {
+        self.back.unwrap_or(default)
+    }
+
+    /// Выравнивание: заданное контролу или `default`.
+    pub fn align(&self, default: Align) -> Align {
+        match self.align {
+            Some(TextAlign::Left) => Align::Left,
+            Some(TextAlign::Center) => Align::Center,
+            Some(TextAlign::Right) => Align::Right,
+            None => default,
+        }
     }
 
     pub fn state(&self) -> VisualState {
@@ -188,9 +241,11 @@ impl Painter<'_> {
         let dx = match align {
             Align::Left => 0.0,
             Align::Center => ((area.width * s - width) / 2.0).max(0.0),
+            Align::Right => (area.width * s - width).max(0.0),
         };
         let origin_x = ((area.x - scroll) * s + dx).round() as i32;
-        let origin_y = ((area.y + (area.height - LINE_HEIGHT) / 2.0) * s).round() as i32;
+        let origin_y =
+            ((area.y + (area.height - self.text.line_height()) / 2.0) * s).round() as i32;
 
         let (stride, height) = (self.pixmap.width() as i32, self.pixmap.height() as i32);
         let left = (clip.left() as i32).max(0);

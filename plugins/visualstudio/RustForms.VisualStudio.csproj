@@ -29,6 +29,7 @@
       <ResourceName>Menus.ctmenu</ResourceName>
     </VSCTCompile>
     <None Include="source.extension.vsixmanifest" />
+    <EmbeddedResource Include="..\..\crates\rustforms-designer\icons\*.png" LogicalName="icons.%(Filename).png" />
     <!-- Сюда же вшивается таблица меню из .vsct. -->
     <EmbeddedResource Update="VSPackage.resx">
       <MergeWithCTO>true</MergeWithCTO>

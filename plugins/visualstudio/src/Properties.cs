@@ -7,6 +7,16 @@ namespace RustForms.VisualStudio
 {
     // Объекты для окна Properties: VS сама строит таблицу по их свойствам и атрибутам.
 
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    internal sealed class ControlEventAttribute : System.Attribute
+    {
+        public ControlEventAttribute(string name) => Event = name;
+
+        public string Event { get; }
+    }
+
+    internal enum TextAlignment { Default, Left, Center, Right }
+
     internal enum DockSide { None, Top, Bottom, Left, Right, Fill }
 
     internal abstract class PropertiesBase : ICustomTypeDescriptor
@@ -24,8 +34,19 @@ namespace RustForms.VisualStudio
         object ICustomTypeDescriptor.GetEditor(System.Type type) => TypeDescriptor.GetEditor(this, type, true);
         EventDescriptorCollection ICustomTypeDescriptor.GetEvents() => EventDescriptorCollection.Empty;
         EventDescriptorCollection ICustomTypeDescriptor.GetEvents(System.Attribute[] a) => EventDescriptorCollection.Empty;
-        PropertyDescriptorCollection ICustomTypeDescriptor.GetProperties() => TypeDescriptor.GetProperties(this, true);
-        PropertyDescriptorCollection ICustomTypeDescriptor.GetProperties(System.Attribute[] a) => TypeDescriptor.GetProperties(this, a, true);
+        PropertyDescriptorCollection ICustomTypeDescriptor.GetProperties() =>
+            Shown(TypeDescriptor.GetProperties(this, true));
+        PropertyDescriptorCollection ICustomTypeDescriptor.GetProperties(System.Attribute[] a) =>
+            Shown(TypeDescriptor.GetProperties(this, a, true));
+
+        private PropertyDescriptorCollection Shown(PropertyDescriptorCollection all)
+        {
+            var events = (Data["events"] as JArray)?.Select(e => (string)e["event"]).ToList();
+            return new PropertyDescriptorCollection(all.Cast<PropertyDescriptor>()
+                .Where(p => !(p.Attributes[typeof(ControlEventAttribute)] is ControlEventAttribute e)
+                    || events != null && events.Contains(e.Event))
+                .ToArray());
+        }
         object ICustomTypeDescriptor.GetPropertyOwner(PropertyDescriptor property) => this;
 
         protected readonly FormController Controller;
@@ -72,6 +93,12 @@ namespace RustForms.VisualStudio
 
         [Category("События"), DisplayName("load"), Description("Двойной клик по пустому месту формы создаёт обработчик.")]
         public string Load { get => Get("load"); set => Set("load", value); }
+
+        [Category("События"), DisplayName("closing")]
+        public string Closing { get => Get("closing"); set => Set("closing", value); }
+
+        [Category("События"), DisplayName("resize")]
+        public string Resize { get => Get("resize"); set => Set("resize", value); }
 
         protected override string ComponentName => Get("name");
         protected override string ClassName => "Форма";
@@ -129,6 +156,74 @@ namespace RustForms.VisualStudio
         [Category("Поведение"), DisplayName("Доступен")]
         public bool Enabled { get => Flag("enabled"); set => Set("enabled", value); }
 
+        [Category("Вид"), DisplayName("Цвет текста (#rrggbb)")]
+        public string ForeColor { get => Get("fore_color"); set => Set("fore_color", value); }
+
+        [Category("Вид"), DisplayName("Фон (#rrggbb)")]
+        public string BackColor { get => Get("back_color"); set => Set("back_color", value); }
+
+        [Category("Вид"), DisplayName("Размер шрифта (0 — обычный)")]
+        public int FontSize { get => (int?)(double?)Data["font_size"] ?? 0; set => Set("font_size", value); }
+
+        [Category("Вид"), DisplayName("Жирный")]
+        public bool Bold { get => Flag("bold"); set => Set("bold", value); }
+
+        [Category("Вид"), DisplayName("Выравнивание")]
+        public TextAlignment Align
+        {
+            get => Data["align"].Type == JTokenType.Null ? TextAlignment.Default
+                : (TextAlignment)System.Enum.Parse(typeof(TextAlignment), Get("align"), true);
+            set => Set("align", value == TextAlignment.Default ? "" : value.ToString().ToLowerInvariant());
+        }
+
+        [Category("Поведение"), DisplayName("Подсказка")]
+        public string Tooltip { get => Get("tooltip"); set => Set("tooltip", value); }
+
+        [Category("Поведение"), DisplayName("Порядок Tab")]
+        public int TabIndex { get => Number("tab_index"); set => Set("tab_index", value); }
+
+        [ControlEvent("click"), Category("События"), DisplayName("click")]
+        public string OnClick { get => Handler("click"); set => SetHandler("click", value); }
+
+        [ControlEvent("text_changed"), Category("События"), DisplayName("text_changed")]
+        public string OnTextChanged { get => Handler("text_changed"); set => SetHandler("text_changed", value); }
+
+        [ControlEvent("checked_changed"), Category("События"), DisplayName("checked_changed")]
+        public string OnCheckedChanged { get => Handler("checked_changed"); set => SetHandler("checked_changed", value); }
+
+        [ControlEvent("selected_changed"), Category("События"), DisplayName("selected_changed")]
+        public string OnSelectedChanged { get => Handler("selected_changed"); set => SetHandler("selected_changed", value); }
+
+        [ControlEvent("item_clicked"), Category("События"), DisplayName("item_clicked")]
+        public string OnItemClicked { get => Handler("item_clicked"); set => SetHandler("item_clicked", value); }
+
+        [ControlEvent("double_click"), Category("События"), DisplayName("double_click")]
+        public string OnDoubleClick { get => Handler("double_click"); set => SetHandler("double_click", value); }
+
+        [ControlEvent("mouse_enter"), Category("События"), DisplayName("mouse_enter")]
+        public string OnMouseEnter { get => Handler("mouse_enter"); set => SetHandler("mouse_enter", value); }
+
+        [ControlEvent("mouse_leave"), Category("События"), DisplayName("mouse_leave")]
+        public string OnMouseLeave { get => Handler("mouse_leave"); set => SetHandler("mouse_leave", value); }
+
+        [ControlEvent("mouse_down"), Category("События"), DisplayName("mouse_down")]
+        public string OnMouseDown { get => Handler("mouse_down"); set => SetHandler("mouse_down", value); }
+
+        [ControlEvent("mouse_up"), Category("События"), DisplayName("mouse_up")]
+        public string OnMouseUp { get => Handler("mouse_up"); set => SetHandler("mouse_up", value); }
+
+        [ControlEvent("key_down"), Category("События"), DisplayName("key_down")]
+        public string OnKeyDown { get => Handler("key_down"); set => SetHandler("key_down", value); }
+
+        [ControlEvent("key_up"), Category("События"), DisplayName("key_up")]
+        public string OnKeyUp { get => Handler("key_up"); set => SetHandler("key_up", value); }
+
+        [ControlEvent("got_focus"), Category("События"), DisplayName("got_focus")]
+        public string OnGotFocus { get => Handler("got_focus"); set => SetHandler("got_focus", value); }
+
+        [ControlEvent("lost_focus"), Category("События"), DisplayName("lost_focus")]
+        public string OnLostFocus { get => Handler("lost_focus"); set => SetHandler("lost_focus", value); }
+
         protected string Handler(string name)
         {
             foreach (var item in (JArray)Data["events"])
@@ -171,9 +266,6 @@ namespace RustForms.VisualStudio
 
         [Category("Контрол"), DisplayName("Текст")]
         public string Text { get => Get("text"); set => Set("text", value); }
-
-        [Category("События"), DisplayName("click")]
-        public string Click { get => Handler("click"); set => SetHandler("click", value); }
     }
 
     internal sealed class LabelPropertiesObject : ControlPropertiesObject
@@ -182,12 +274,6 @@ namespace RustForms.VisualStudio
 
         [Category("Контрол"), DisplayName("Текст")]
         public string Text { get => Get("text"); set => Set("text", value); }
-
-        [Category("Вид"), DisplayName("Цвет текста (#rrggbb)")]
-        public string ForeColor { get => Get("fore_color"); set => Set("fore_color", value); }
-
-        [Category("События"), DisplayName("click")]
-        public string Click { get => Handler("click"); set => SetHandler("click", value); }
     }
 
     internal sealed class TextBoxPropertiesObject : ControlPropertiesObject
@@ -200,8 +286,11 @@ namespace RustForms.VisualStudio
         [Category("Поведение"), DisplayName("Многострочный")]
         public bool Multiline { get => Flag("multiline"); set => Set("multiline", value); }
 
-        [Category("События"), DisplayName("text_changed")]
-        public string TextChanged { get => Handler("text_changed"); set => SetHandler("text_changed", value); }
+        [Category("Поведение"), DisplayName("Только чтение")]
+        public bool ReadOnly { get => Flag("read_only"); set => Set("read_only", value); }
+
+        [Category("Поведение"), DisplayName("Пароль")]
+        public bool Password { get => Flag("password"); set => Set("password", value); }
     }
 
     internal sealed class CheckBoxPropertiesObject : ControlPropertiesObject
@@ -213,12 +302,6 @@ namespace RustForms.VisualStudio
 
         [Category("Поведение"), DisplayName("Отмечен")]
         public bool Checked { get => Flag("checked"); set => Set("checked", value); }
-
-        [Category("События"), DisplayName("checked_changed")]
-        public string CheckedChanged { get => Handler("checked_changed"); set => SetHandler("checked_changed", value); }
-
-        [Category("События"), DisplayName("click")]
-        public string Click { get => Handler("click"); set => SetHandler("click", value); }
     }
 
     internal sealed class ListPropertiesObject : ControlPropertiesObject
@@ -239,9 +322,6 @@ namespace RustForms.VisualStudio
             get => (int?)Data["selected"] ?? -1;
             set => Set("selected", value);
         }
-
-        [Category("События"), DisplayName("selected_changed")]
-        public string SelectedChanged { get => Handler("selected_changed"); set => SetHandler("selected_changed", value); }
     }
 
     internal sealed class MenuStripPropertiesObject : ControlPropertiesObject
@@ -254,9 +334,6 @@ namespace RustForms.VisualStudio
             get => ((JArray)Data["items"]).Select(i => (string)i).ToArray();
             set => Set("items", value);
         }
-
-        [Category("События"), DisplayName("item_clicked")]
-        public string ItemClicked { get => Handler("item_clicked"); set => SetHandler("item_clicked", value); }
     }
 
     internal sealed class ProgressBarPropertiesObject : ControlPropertiesObject
@@ -276,9 +353,6 @@ namespace RustForms.VisualStudio
     internal sealed class PanelPropertiesObject : ControlPropertiesObject
     {
         public PanelPropertiesObject(FormController c, JObject o) : base(c, o) { }
-
-        [Category("Вид"), DisplayName("Фон (#rrggbb)")]
-        public string BackColor { get => Get("back_color"); set => Set("back_color", value); }
 
         [Category("Вид"), DisplayName("Рамка")]
         public bool Border { get => Flag("border"); set => Set("border", value); }

@@ -121,3 +121,39 @@ fn every_kind_survives_save_and_generates_setup() {
     model.controls.iter_mut().find(|c| c.name == "list_box1").unwrap().selected = Some(9);
     assert!(model.validate().is_err());
 }
+
+#[test]
+fn common_properties_form_events_and_git_projects() {
+    let mut model = FormModel::new("F");
+    let mut c = Control::new(Kind::Label, "title", 0.0, 0.0);
+    c.fore_color = Some("#102030".into());
+    c.back_color = Some("#ffffff".into());
+    c.font_size = Some(20.0);
+    c.bold = true;
+    c.tooltip = Some("\"hint\"".into());
+    c.tab_index = 3;
+    c.align = Some(Align::Right);
+    c.events.insert(Event::MouseEnter, "title_enter".into());
+    model.controls.push(c);
+    model.form.closing = Some("f_closing".into());
+    assert_eq!(FormModel::from_toml(&model.to_toml().unwrap()).unwrap(), model);
+    let code = designer_code(&model).unwrap();
+    for part in [
+        "title.set_fore_color(Color::rgb(16, 32, 48));",
+        "title.set_font_size(20.0);",
+        "title.set_tooltip(\"\\\"hint\\\"\");",
+        "title.set_text_align(TextAlign::Right);",
+        "view.on_closing(Self::f_closing);",
+        "view.on_mouse_enter(title_id, Self::title_enter);",
+    ] {
+        assert!(code.contains(part), "{part}\n{code}");
+    }
+
+    let dir = temp("git").join("app");
+    fs::create_dir_all(&dir).unwrap();
+    new_project(&dir, Library::Git { url: "https://example.invalid/r.git", tag: "v1" }).unwrap();
+    let manifest = fs::read_to_string(dir.join("Cargo.toml")).unwrap();
+    assert!(manifest.contains("rustforms = { git = \"https://example.invalid/r.git\", tag = \"v1\" }"));
+    assert!(dir.join(".cargo/config.toml").is_file());
+    fs::remove_dir_all(dir.parent().unwrap()).unwrap();
+}

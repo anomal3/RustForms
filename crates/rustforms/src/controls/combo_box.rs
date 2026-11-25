@@ -1,4 +1,4 @@
-use super::items::{Items, ROW, visible_rows};
+use super::items::{Items, visible_rows};
 use crate::{Align, Color, Control, ControlBase, ControlImpl, EventCx, Key, Modifiers, Painter, Point, Rect};
 
 const MAX_ROWS: usize = 8;
@@ -98,7 +98,7 @@ impl ControlImpl for ComboBox {
         let border = if state.focused { Color::ACCENT } else { Color::BORDER };
         p.fill_round_rect(area, 4.0, border);
         p.fill_round_rect(area.inset(1.0), 3.0, face);
-        let ink = if state.enabled { Color::TEXT } else { Color::TEXT_DISABLED };
+        let ink = p.fore_color(Color::TEXT);
         let text = Rect::new(8.0, 0.0, (area.width - 30.0).max(0.0), area.height);
         p.text(self.items.selected_text().unwrap_or(""), text, ink, Align::Left, 0.0);
         // Стрелка из полосок: не зависит от того, есть ли значок в шрифте.
@@ -136,7 +136,8 @@ impl ControlImpl for ComboBox {
     }
 
     fn popup_size(&self) -> Option<(f32, f32)> {
-        self.open.then(|| (self.base.bounds.width, self.rows() as f32 * ROW + 2.0))
+        let height = self.rows() as f32 * self.items.row_height() + 2.0;
+        self.open.then_some((self.base.bounds.width, height))
     }
 
     fn close_popup(&mut self) {
@@ -148,7 +149,7 @@ impl ControlImpl for ComboBox {
         self.items.paint(p, hot);
     }
 
-    fn on_popup_mouse_move(&mut self, at: Point) {
+    fn on_popup_mouse_move(&mut self, at: Point, _cx: &mut EventCx) {
         self.hot = self.items.row_at(at.y).or(self.hot);
     }
 

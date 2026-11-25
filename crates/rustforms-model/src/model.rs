@@ -83,16 +83,31 @@ impl Kind {
         }
     }
 
-    /// События контрола; первое создаётся двойным кликом.
-    pub fn events(self) -> &'static [Event] {
-        match self {
-            Kind::Button | Kind::Label => &[Event::Click],
-            Kind::TextBox => &[Event::TextChanged],
-            Kind::CheckBox | Kind::RadioButton => &[Event::CheckedChanged, Event::Click],
-            Kind::ComboBox | Kind::ListBox => &[Event::SelectedChanged],
-            Kind::MenuStrip => &[Event::ItemClicked],
-            Kind::ProgressBar | Kind::Panel => &[],
+    pub fn focusable(self) -> bool {
+        !matches!(self, Kind::Label | Kind::ProgressBar | Kind::MenuStrip | Kind::Panel)
+    }
+
+    /// События контрола; первое создаётся двойным кликом в дизайнере.
+    pub fn events(self) -> Vec<Event> {
+        let mut events = match self {
+            Kind::Button | Kind::Label => vec![Event::Click],
+            Kind::TextBox => vec![Event::TextChanged],
+            Kind::CheckBox | Kind::RadioButton => vec![Event::CheckedChanged, Event::Click],
+            Kind::ComboBox | Kind::ListBox => vec![Event::SelectedChanged],
+            Kind::MenuStrip => vec![Event::ItemClicked],
+            Kind::ProgressBar | Kind::Panel => Vec::new(),
+        };
+        events.extend([
+            Event::DoubleClick,
+            Event::MouseEnter,
+            Event::MouseLeave,
+            Event::MouseDown,
+            Event::MouseUp,
+        ]);
+        if self.focusable() {
+            events.extend([Event::KeyDown, Event::KeyUp, Event::GotFocus, Event::LostFocus]);
         }
+        events
     }
 }
 
@@ -105,17 +120,42 @@ pub enum Event {
     CheckedChanged,
     SelectedChanged,
     ItemClicked,
+    DoubleClick,
+    MouseEnter,
+    MouseLeave,
+    MouseDown,
+    MouseUp,
+    KeyDown,
+    KeyUp,
+    GotFocus,
+    LostFocus,
+    Closing,
+    Resize,
 }
 
 impl Event {
-    pub const ALL: [Event; 6] = [
+    pub const ALL: [Event; 17] = [
         Event::Load,
         Event::Click,
         Event::TextChanged,
         Event::CheckedChanged,
         Event::SelectedChanged,
         Event::ItemClicked,
+        Event::DoubleClick,
+        Event::MouseEnter,
+        Event::MouseLeave,
+        Event::MouseDown,
+        Event::MouseUp,
+        Event::KeyDown,
+        Event::KeyUp,
+        Event::GotFocus,
+        Event::LostFocus,
+        Event::Closing,
+        Event::Resize,
     ];
+
+    /// События самой формы, а не контрола.
+    pub const FORM: [Event; 3] = [Event::Load, Event::Closing, Event::Resize];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -125,6 +165,17 @@ impl Event {
             Event::CheckedChanged => "checked_changed",
             Event::SelectedChanged => "selected_changed",
             Event::ItemClicked => "item_clicked",
+            Event::DoubleClick => "double_click",
+            Event::MouseEnter => "mouse_enter",
+            Event::MouseLeave => "mouse_leave",
+            Event::MouseDown => "mouse_down",
+            Event::MouseUp => "mouse_up",
+            Event::KeyDown => "key_down",
+            Event::KeyUp => "key_up",
+            Event::GotFocus => "got_focus",
+            Event::LostFocus => "lost_focus",
+            Event::Closing => "closing",
+            Event::Resize => "resize",
         }
     }
 
@@ -136,6 +187,15 @@ impl Event {
             Event::CheckedChanged => "CheckedChangedArgs",
             Event::SelectedChanged => "SelectedChangedArgs",
             Event::ItemClicked => "MenuItemArgs",
+            Event::DoubleClick
+            | Event::MouseEnter
+            | Event::MouseLeave
+            | Event::MouseDown
+            | Event::MouseUp => "MouseArgs",
+            Event::KeyDown | Event::KeyUp => "KeyArgs",
+            Event::GotFocus | Event::LostFocus => "FocusArgs",
+            Event::Closing => "ClosingArgs",
+            Event::Resize => "ResizeArgs",
         }
     }
 }
@@ -190,6 +250,26 @@ impl Dock {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Align {
+    Left,
+    Center,
+    Right,
+}
+
+impl Align {
+    pub const ALL: [Align; 3] = [Align::Left, Align::Center, Align::Right];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Align::Left => "left",
+            Align::Center => "center",
+            Align::Right => "right",
+        }
+    }
+}
+
 pub fn default_anchor() -> BTreeSet<Side> {
     BTreeSet::from([Side::Left, Side::Top])
 }
@@ -212,9 +292,13 @@ pub struct FormProps {
     pub height: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub back_color: Option<String>,
-    /// Имя обработчика загрузки.
+    /// Имена обработчиков событий формы.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub load: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closing: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resize: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -263,12 +347,27 @@ pub struct Control {
     pub minimum: i32,
     #[serde(default = "hundred", skip_serializing_if = "is_hundred")]
     pub maximum: i32,
-    /// Только `Label`.
+    /// Цвета в виде `#rrggbb`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fore_color: Option<String>,
-    /// Только `Panel`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub back_color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<f32>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bold: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tooltip: Option<String>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub tab_index: i32,
+    /// `Button` и `Label`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub align: Option<Align>,
+    /// Только `TextBox`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub password: bool,
     /// Только `Panel`.
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub border: bool,
@@ -329,6 +428,13 @@ impl Control {
             maximum: 100,
             fore_color: None,
             back_color: None,
+            font_size: None,
+            bold: false,
+            tooltip: None,
+            tab_index: 0,
+            align: None,
+            read_only: false,
+            password: false,
             border: true,
             events: BTreeMap::new(),
         }
@@ -354,6 +460,8 @@ impl FormModel {
                 height: 320.0,
                 back_color: None,
                 load: None,
+                closing: None,
+                resize: None,
             },
             controls: Vec::new(),
         }
@@ -393,7 +501,10 @@ impl FormModel {
 
     /// Обработчики формы вместе с типом события.
     pub fn handlers(&self) -> Vec<(&str, Event)> {
-        let load = self.form.load.iter().map(|name| (name.as_str(), Event::Load));
+        let form = &self.form;
+        let load = [(&form.load, Event::Load), (&form.closing, Event::Closing), (&form.resize, Event::Resize)]
+            .into_iter()
+            .filter_map(|(name, event)| name.as_deref().map(|n| (n, event)));
         let controls = self
             .controls
             .iter()
@@ -432,6 +543,9 @@ impl FormModel {
             }
             if c.selected.is_some_and(|i| i >= c.items.len()) {
                 return fail(format!("`{}`: выбранной строки нет в списке", c.name));
+            }
+            if c.font_size.is_some_and(|size| !(4.0..=200.0).contains(&size)) {
+                return fail(format!("`{}`: размер шрифта от 4 до 200", c.name));
             }
             if c.maximum < c.minimum {
                 return fail(format!("`{}`: максимум меньше минимума", c.name));

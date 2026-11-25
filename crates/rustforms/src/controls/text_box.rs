@@ -5,7 +5,6 @@ use crate::{
 };
 
 const PADDING: f32 = 6.0;
-const LINE: f32 = 20.0;
 const TOP: f32 = 4.0;
 
 /// Поле ввода; по умолчанию однострочное, см. [`TextBox::set_multiline`].
@@ -23,6 +22,10 @@ pub struct TextBox {
     /// Прокрутить к курсору при следующей отрисовке (колесо это отменяет).
     follow: bool,
     wheel: f32,
+    read_only: bool,
+    password: bool,
+    /// Высота строки при прошлой отрисовке (зависит от шрифта).
+    line: f32,
 }
 
 impl TextBox {
@@ -37,11 +40,46 @@ impl TextBox {
             top: 0,
             follow: true,
             wheel: 0.0,
+            read_only: false,
+            password: false,
+            line: 20.0,
         }
     }
 
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    pub fn read_only(&self) -> bool {
+        self.read_only
+    }
+
+    /// Только чтение: выделять и копировать можно, менять нельзя.
+    pub fn set_read_only(&mut self, read_only: bool) {
+        self.read_only = read_only;
+    }
+
+    pub fn password(&self) -> bool {
+        self.password
+    }
+
+    /// Показывать точки вместо символов (только для однострочного поля).
+    pub fn set_password(&mut self, password: bool) {
+        self.password = password;
+    }
+
+    /// То, что видно на экране, и позиции курсора в байтах настоящего текста.
+    fn positions(&self, text: &mut crate::TextSystem, line: std::ops::Range<usize>) -> Vec<(usize, f32)> {
+        let source = &self.text[line];
+        if !self.password || self.multiline {
+            return text.caret_positions(source);
+        }
+        let dot = text.width("●");
+        let mut positions = vec![(0, 0.0)];
+        for (n, (i, ch)) in source.char_indices().enumerate() {
+            positions.push((i + ch.len_utf8(), dot * (n + 1) as f32));
+        }
+        positions
     }
 
     pub fn multiline(&self) -> bool {
@@ -72,9 +110,8 @@ impl TextBox {
 
     /// Позиция в строке `line`, ближайшая к горизонтальной координате.
     fn index_in(&self, line: std::ops::Range<usize>, x: f32, cx: &mut EventCx) -> usize {
-        let offset = cx
-            .text_system()
-            .caret_positions(&self.text[line.clone()])
+        let offset = self
+            .positions(cx.text_system(), line.clone())
             .into_iter()
             .min_by(|a, b| (a.1 - x).abs().total_cmp(&(b.1 - x).abs()))
             .map_or(0, |p| p.0);
@@ -104,6 +141,9 @@ impl TextBox {
         let state = p.state();
         let area = p.area();
         let width = (area.width - PADDING * 2.0).max(0.0);
+        self.line = p.text_system().line_height();
+        #[allow(non_snake_case)]
+        let LINE = self.line;
         let visible = (((area.height - TOP * 2.0) / LINE).floor() as usize).max(1);
         let lines: Vec<&str> = self.text.split('\n').collect();
         let cursor_line = self.text[..self.cursor].matches('\n').count();
@@ -126,7 +166,7 @@ impl TextBox {
         self.top = self.top.min(lines.len().saturating_sub(visible));
 
         let selection = self.selection();
-        let ink = if state.enabled { Color::TEXT } else { Color::TEXT_DISABLED };
+        let ink = p.fore_color(Color::TEXT);
         let mut start = 0;
         for (number, line) in lines.iter().enumerate() {
             let end = start + line.len();
@@ -176,6 +216,9 @@ impl TextBox {
     }
 
     fn replace_selection(&mut self, with: &str, cx: &mut EventCx) {
+        if self.read_only {
+            return;
+        }
         let range = self.selection();
         if range.is_empty() && with.is_empty() {
             return;
@@ -208,7 +251,7 @@ impl TextBox {
 
     fn index_at(&self, at: Point, cx: &mut EventCx) -> usize {
         let line = if self.multiline {
-            let number = self.top + ((at.y - TOP) / LINE).floor().max(0.0) as usize;
+            let number = self.top + ((at.y - TOP) / self.line).floor().max(0.0) as usize;
             let mut start = 0;
             for _ in 0..number {
                 match self.text[start..].find('\n') {
@@ -246,7 +289,7 @@ impl ControlImpl for TextBox {
     fn on_paint(&mut self, p: &mut Painter) {
         let state = p.state();
         let area = p.area();
-        let face = if state.enabled { Color::WHITE } else { Color::FORM };
+        let face = p.back_color(if state.enabled { Color::WHITE } else { Color::FORM });
         p.fill_rect(area, face);
         p.stroke_rect(area, Color::BORDER, 1.0);
         if state.focused {
@@ -258,7 +301,7 @@ impl ControlImpl for TextBox {
         }
 
         let inner = Rect::new(PADDING, 2.0, (area.width - PADDING * 2.0).max(0.0), area.height - 4.0);
-        let positions = p.text_system().caret_positions(&self.text);
+        let positions = self.positions(p.text_system(), 0..self.text.len());
         let x_of = |index: usize| {
             positions.iter().find(|q| q.0 == index).map_or(0.0, |q| q.1)
         };
@@ -278,8 +321,13 @@ impl ControlImpl for TextBox {
             let band = Rect::new(inner.x + from, 4.0, to - from, area.height - 8.0);
             p.fill_rect(band.intersect(&inner), Color::SELECTION);
         }
-        let ink = if state.enabled { Color::TEXT } else { Color::TEXT_DISABLED };
-        p.text(&self.text, inner, ink, Align::Left, self.scroll);
+        let ink = p.fore_color(Color::TEXT);
+        let shown = if self.password {
+            "●".repeat(self.text.chars().count())
+        } else {
+            self.text.clone()
+        };
+        p.text(&shown, inner, ink, Align::Left, self.scroll);
         if state.focused {
             let caret = Rect::new(inner.x + cursor_x - self.scroll, 5.0, 1.0, area.height - 10.0);
             p.fill_rect(caret, Color::TEXT);
@@ -333,6 +381,11 @@ impl ControlImpl for TextBox {
                 self.anchor = 0;
                 self.cursor = self.text.len();
             }
+            Key::Backspace | Key::Delete | Key::Cut if self.read_only => {
+                if key == Key::Cut {
+                    self.on_key(Key::Copy, mods, cx);
+                }
+            }
             Key::Backspace => {
                 if selection.is_empty() {
                     self.anchor = self.previous(self.cursor);
@@ -345,7 +398,8 @@ impl ControlImpl for TextBox {
                 }
                 self.replace_selection("", cx);
             }
-            Key::Copy | Key::Cut if !selection.is_empty() => {
+            // Пароль из поля не копируется.
+            Key::Copy | Key::Cut if !selection.is_empty() && !self.password => {
                 cx.clipboard_set(&self.text[selection]);
                 if key == Key::Cut {
                     self.replace_selection("", cx);

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, num::NonZeroU32, rc::Rc};
+use std::{collections::HashMap, error::Error, num::NonZeroU32, rc::Rc, time::Instant};
 
 use softbuffer::{Context, Surface};
 use tiny_skia::Pixmap;
@@ -124,6 +124,13 @@ impl Host {
     }
 
     fn close(&mut self, event_loop: &ActiveEventLoop, id: WindowId) {
+        // Форма может отказаться (событие `closing`).
+        if let Some(open) = self.windows.get_mut(&id)
+            && !open.form.form.try_close()
+        {
+            open.window.request_redraw();
+            return;
+        }
         let children: Vec<WindowId> = self
             .windows
             .iter()
@@ -190,6 +197,12 @@ impl Host {
     }
 }
 
+/// `KeyA` → `A`, `Digit1` → `1`; остальные имена как есть (`Enter`, `ArrowUp`, `F5`).
+fn key_name(code: KeyCode) -> String {
+    let name = format!("{code:?}");
+    name.strip_prefix("Key").or_else(|| name.strip_prefix("Digit")).unwrap_or(&name).to_owned()
+}
+
 /// Сочетания определяются по физической клавише, чтобы работать в русской раскладке.
 fn map_key(code: KeyCode, mods: Modifiers) -> Option<Key> {
     Some(match code {
@@ -214,6 +227,21 @@ fn map_key(code: KeyCode, mods: Modifiers) -> Option<Key> {
 }
 
 impl ApplicationHandler for Host {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Единственное, что происходит без событий, — появление подсказки.
+        let now = Instant::now();
+        let mut next: Option<Instant> = None;
+        for open in self.windows.values_mut() {
+            if open.form.form.tick(now) {
+                open.window.request_redraw();
+            }
+            if let Some(at) = open.form.form.tooltip_deadline() {
+                next = Some(next.map_or(at, |n| n.min(at)));
+            }
+        }
+        event_loop.set_control_flow(next.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let Some(first) = self.first.take() else { return };
         match self.create(event_loop, first, None) {
@@ -281,8 +309,18 @@ impl ApplicationHandler for Host {
                 form.wheel(lines);
             }
             WindowEvent::KeyboardInput { event, is_synthetic: false, .. }
+                if event.state == ElementState::Released =>
+            {
+                if let PhysicalKey::Code(code) = event.physical_key {
+                    form.raw_key(&key_name(code), mods, false);
+                }
+            }
+            WindowEvent::KeyboardInput { event, is_synthetic: false, .. }
                 if event.state == ElementState::Pressed =>
             {
+                if let PhysicalKey::Code(code) = event.physical_key {
+                    form.raw_key(&key_name(code), mods, true);
+                }
                 if let PhysicalKey::Code(code) = event.physical_key
                     && let Some(key) = map_key(code, mods)
                 {
@@ -299,6 +337,7 @@ impl ApplicationHandler for Host {
                 let logical = size.to_logical::<f32>(window.scale_factor());
                 form.ui().width = logical.width;
                 form.ui().height = logical.height;
+                form.resized();
             }
             WindowEvent::Focused(false) => form.close_popups(),
             WindowEvent::ScaleFactorChanged { .. } | WindowEvent::Focused(true) => {}

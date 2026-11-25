@@ -9,12 +9,14 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.List;
+import javax.swing.BorderFactory;
 import javax.swing.DefaultCellEditor;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JSplitPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.table.AbstractTableModel;
@@ -23,16 +25,18 @@ import javax.swing.table.TableCellRenderer;
 
 /** Окно свойств и событий, как Properties в Visual Studio. */
 public final class PropertiesPanel extends JPanel {
-    private enum Type { TEXT, NUMBER, FLAG, EVENT, DOCK }
+    private enum Type { TEXT, NUMBER, FLAG, EVENT, DOCK, ALIGN }
 
     private record Row(String label, String owner, String property, Type type, Object value) {
     }
 
     private final FormController controller;
     private final List<Row> rows = new ArrayList<>();
+    private final List<Row> events = new ArrayList<>();
     private final JComboBox<String> chooser = new JComboBox<>();
     private final JButton go = new JButton("Перейти к обработчику");
-    private final Model model = new Model();
+    private final Model model = new Model(rows, "Свойство");
+    private final Model eventModel = new Model(events, "Событие");
     private boolean refreshing;
 
     private final JTable table = new JTable(model) {
@@ -48,6 +52,8 @@ public final class PropertiesPanel extends JPanel {
                 case FLAG -> new DefaultCellEditor(flagBox());
                 case DOCK -> new DefaultCellEditor(new JComboBox<>(
                         new String[] {"none", "top", "bottom", "left", "right", "fill"}));
+                case ALIGN -> new DefaultCellEditor(new JComboBox<>(
+                        new String[] {"", "left", "center", "right"}));
                 default -> new DefaultCellEditor(new JTextField());
             };
         }
@@ -62,6 +68,8 @@ public final class PropertiesPanel extends JPanel {
         }
     };
 
+    private final JTable eventTable = new JTable(eventModel);
+
     private static JCheckBox flagBox() {
         JCheckBox box = new JCheckBox();
         box.setHorizontalAlignment(JCheckBox.CENTER);
@@ -71,12 +79,21 @@ public final class PropertiesPanel extends JPanel {
     public PropertiesPanel(FormController controller) {
         super(new BorderLayout(0, 4));
         this.controller = controller;
-        table.setRowHeight(24);
-        table.getTableHeader().setReorderingAllowed(false);
-        table.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
+        for (JTable each : new JTable[] {table, eventTable}) {
+            each.setRowHeight(24);
+            each.getTableHeader().setReorderingAllowed(false);
+            each.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
+        }
+        // Свойства сверху, события снизу; границу можно двигать мышью.
+        JPanel lower = new JPanel(new BorderLayout(0, 4));
+        lower.add(new JScrollPane(eventTable));
+        lower.add(go, BorderLayout.SOUTH);
+        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, new JScrollPane(table), lower);
+        split.setResizeWeight(0.72);
+        split.setContinuousLayout(true);
+        split.setBorder(BorderFactory.createEmptyBorder());
         add(chooser, BorderLayout.NORTH);
-        add(new JScrollPane(table));
-        add(go, BorderLayout.SOUTH);
+        add(split);
 
         chooser.addActionListener(e -> {
             if (!refreshing) {
@@ -85,11 +102,11 @@ public final class PropertiesPanel extends JPanel {
             }
         });
         go.addActionListener(e -> goToHandler());
-        table.getSelectionModel().addListSelectionListener(e -> updateButton());
-        table.addMouseListener(new MouseAdapter() {
+        eventTable.getSelectionModel().addListSelectionListener(e -> updateButton());
+        eventTable.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
-                if (e.getClickCount() == 2 && table.columnAtPoint(e.getPoint()) == 0) {
+                if (e.getClickCount() == 2 && eventTable.columnAtPoint(e.getPoint()) == 0) {
                     goToHandler();
                 }
             }
@@ -99,8 +116,8 @@ public final class PropertiesPanel extends JPanel {
     }
 
     private Row eventRow() {
-        int row = table.getSelectedRow();
-        return row >= 0 && row < rows.size() && rows.get(row).type() == Type.EVENT ? rows.get(row) : null;
+        int row = eventTable.getSelectedRow();
+        return row >= 0 && row < events.size() ? events.get(row) : null;
     }
 
     private void updateButton() {
@@ -138,6 +155,21 @@ public final class PropertiesPanel extends JPanel {
             for (String[] p : new String[][] {{"X", "x"}, {"Y", "y"}, {"Ширина", "width"}, {"Высота", "height"}}) {
                 next.add(new Row(p[0], selected, p[1], Type.NUMBER, control.get(p[1]).getAsInt()));
             }
+            next.add(new Row("Цвет текста (#rrggbb)", selected, "fore_color", Type.TEXT, text(control, "fore_color")));
+            next.add(new Row("Фон (#rrggbb)", selected, "back_color", Type.TEXT, text(control, "back_color")));
+            JsonElement size = control.get("font_size");
+            next.add(new Row("Шрифт (0 — обычный)", selected, "font_size", Type.NUMBER,
+                    size.isJsonNull() ? 0 : size.getAsInt()));
+            next.add(new Row("Жирный", selected, "bold", Type.FLAG, control.get("bold").getAsBoolean()));
+            next.add(new Row("Подсказка", selected, "tooltip", Type.TEXT, text(control, "tooltip")));
+            next.add(new Row("Порядок Tab", selected, "tab_index", Type.NUMBER, control.get("tab_index").getAsInt()));
+            if (kind.equals("Button") || kind.equals("Label")) {
+                next.add(new Row("Выравнивание", selected, "align", Type.ALIGN, text(control, "align")));
+            }
+            if (kind.equals("TextBox")) {
+                next.add(new Row("Только чтение", selected, "read_only", Type.FLAG, control.get("read_only").getAsBoolean()));
+                next.add(new Row("Пароль", selected, "password", Type.FLAG, control.get("password").getAsBoolean()));
+            }
             next.add(new Row("Dock", selected, "dock", Type.DOCK, text(control, "dock")));
             for (String[] s : new String[][] {{"слева", "left"}, {"сверху", "top"}, {"справа", "right"}, {"снизу", "bottom"}}) {
                 boolean on = control.getAsJsonArray("anchor").contains(new JsonPrimitive(s[1]));
@@ -166,11 +198,7 @@ public final class PropertiesPanel extends JPanel {
             if (kind.equals("CheckBox") || kind.equals("RadioButton")) {
                 next.add(new Row("Отмечен", selected, "checked", Type.FLAG, control.get("checked").getAsBoolean()));
             }
-            if (kind.equals("Label")) {
-                next.add(new Row("Цвет текста (#rrggbb)", selected, "fore_color", Type.TEXT, text(control, "fore_color")));
-            }
             if (kind.equals("Panel")) {
-                next.add(new Row("Фон (#rrggbb)", selected, "back_color", Type.TEXT, text(control, "back_color")));
                 next.add(new Row("Рамка", selected, "border", Type.FLAG, control.get("border").getAsBoolean()));
             }
             next.add(new Row("Свой тип", selected, "custom", Type.TEXT, text(control, "custom")));
@@ -185,7 +213,9 @@ public final class PropertiesPanel extends JPanel {
             next.add(new Row("Ширина", null, "width", Type.NUMBER, form.get("width").getAsInt()));
             next.add(new Row("Высота", null, "height", Type.NUMBER, form.get("height").getAsInt()));
             next.add(new Row("Фон (#rrggbb)", null, "back_color", Type.TEXT, text(form, "back_color")));
-            next.add(new Row("⚡ load", null, "load", Type.EVENT, text(form, "load")));
+            for (String event : new String[] {"load", "closing", "resize"}) {
+                next.add(new Row("⚡ " + event, null, event, Type.EVENT, text(form, event)));
+            }
         }
 
         refreshing = true;
@@ -201,33 +231,49 @@ public final class PropertiesPanel extends JPanel {
         }
         refreshing = false;
 
-        if (!next.equals(rows)) {
-            if (table.isEditing()) {
-                table.getCellEditor().cancelCellEditing();
-            }
-            int keep = table.getSelectedRow();
-            rows.clear();
-            rows.addAll(next);
-            model.fireTableDataChanged();
-            if (keep >= 0 && keep < rows.size()) {
-                table.setRowSelectionInterval(keep, keep);
-            }
-        }
+        fill(table, model, rows, next.stream().filter(r -> r.type() != Type.EVENT).toList());
+        fill(eventTable, eventModel, events, next.stream().filter(r -> r.type() == Type.EVENT).toList());
         updateButton();
+    }
+
+    private static void fill(JTable table, Model model, List<Row> target, List<Row> next) {
+        if (next.equals(target)) {
+            return;
+        }
+        if (table.isEditing()) {
+            table.getCellEditor().cancelCellEditing();
+        }
+        int keep = table.getSelectedRow();
+        target.clear();
+        target.addAll(next);
+        model.fireTableDataChanged();
+        if (keep >= 0 && keep < target.size()) {
+            table.setRowSelectionInterval(keep, keep);
+        }
     }
 
     /** Применить введённое значение. Видно и проверке вне IDE. */
     public void edit(String label, Object value) {
-        for (int i = 0; i < rows.size(); i++) {
-            if (rows.get(i).label().equals(label)) {
-                model.setValueAt(value, i, 1);
-                return;
+        for (Model each : new Model[] {model, eventModel}) {
+            for (int i = 0; i < each.rows.size(); i++) {
+                if (each.rows.get(i).label().equals(label)) {
+                    each.setValueAt(value, i, 1);
+                    return;
+                }
             }
         }
         throw new IllegalArgumentException("нет строки " + label);
     }
 
     private final class Model extends AbstractTableModel {
+        private final List<Row> rows;
+        private final String header;
+
+        Model(List<Row> rows, String header) {
+            this.rows = rows;
+            this.header = header;
+        }
+
         @Override
         public int getRowCount() {
             return rows.size();
@@ -240,7 +286,7 @@ public final class PropertiesPanel extends JPanel {
 
         @Override
         public String getColumnName(int column) {
-            return column == 0 ? "Свойство" : "Значение";
+            return column == 0 ? header : header.equals("Событие") ? "Обработчик" : "Значение";
         }
 
         @Override

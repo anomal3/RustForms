@@ -30,7 +30,9 @@ pub use input::{Key, Modifiers};
 pub use layout::{Anchor, Dock};
 pub use paint::{Align, Painter, TextSystem, VisualState};
 pub use ui::{Container, ControlId, Handle, Ui};
+pub use paint::{FontStyle, TextAlign};
 pub use view::{
+    ClosingArgs, FocusArgs, KeyArgs, MouseArgs, ResizeArgs,
     CheckedChangedArgs, ClickArgs, LoadArgs, MenuItemArgs, RaisesCheckedChanged, RaisesItemClicked, RaisesSelectedChanged,
     RaisesTextChanged, SelectedChangedArgs, TextChangedArgs, View,
 };
@@ -39,7 +41,7 @@ pub use window::{RunError, run};
 /// Всё, что обычно нужно форме.
 pub mod prelude {
     pub use crate::{
-        MenuItemArgs, MenuStrip, ComboBox, ListBox, ProgressBar, RadioButton, SelectedChangedArgs, Align, Anchor, Dock, Application, Button, CheckBox, CheckedChangedArgs, ClickArgs, Color, Control,
+        ClosingArgs, FocusArgs, KeyArgs, MouseArgs, ResizeArgs, TextAlign, MenuItemArgs, MenuStrip, ComboBox, ListBox, ProgressBar, RadioButton, SelectedChangedArgs, Align, Anchor, Dock, Application, Button, CheckBox, CheckedChangedArgs, ClickArgs, Color, Control,
         ControlBase, ControlExt, ControlImpl, EventCx, Handle, Key, Label, LoadArgs,
         Modifiers, Painter, Panel, Point, Rect, TextBox, TextChangedArgs, Ui, View, run,
     };

@@ -8,7 +8,7 @@ use std::{
 
 use eframe::egui::{self, Event as Input, Key, Modifiers, Sense, ViewportCommand};
 use rustforms_model::{
-    Event, FormModel, Kind, attach_handler, load, new_form, new_project, save,
+    Event, FormModel, Kind, attach_handler, load, new_form, save,
 };
 
 use crate::{canvas::Drag, document::Document, preview::Preview};
@@ -19,6 +19,31 @@ fn tell_ide(message: std::fmt::Arguments) {
     // Если IDE уже закрыла канал, сообщать некому.
     let _ = writeln!(out, "{message}");
     let _ = out.flush();
+}
+
+/// Значок элемента; те же файлы берут плагины IDE.
+fn icon(ctx: &egui::Context, kind: Kind) -> Option<egui::TextureHandle> {
+    macro_rules! png {
+        ($name:literal) => {
+            include_bytes!(concat!("../icons/", $name, ".png")).as_slice()
+        };
+    }
+    let bytes = match kind {
+        Kind::Button => png!("Button"),
+        Kind::Label => png!("Label"),
+        Kind::TextBox => png!("TextBox"),
+        Kind::CheckBox => png!("CheckBox"),
+        Kind::RadioButton => png!("RadioButton"),
+        Kind::ComboBox => png!("ComboBox"),
+        Kind::ListBox => png!("ListBox"),
+        Kind::ProgressBar => png!("ProgressBar"),
+        Kind::MenuStrip => png!("MenuStrip"),
+        Kind::Panel => png!("Panel"),
+    };
+    let pixmap = tiny_skia::Pixmap::decode_png(bytes).ok()?;
+    let size = [pixmap.width() as usize, pixmap.height() as usize];
+    let image = egui::ColorImage::from_rgba_premultiplied(size, pixmap.data());
+    Some(ctx.load_texture(kind.name(), image, egui::TextureOptions::LINEAR))
 }
 
 pub struct Open {
@@ -52,6 +77,7 @@ pub struct Designer {
     /// Левый верхний угол клиентской области формы на экране (нужен тестам).
     pub origin: egui::Pos2,
     pub snap: bool,
+    icons: Vec<egui::TextureHandle>,
     pub status: String,
     pub request: Option<Request>,
     /// Действие, ждущее ответа «сохранить изменения?».
@@ -71,6 +97,7 @@ impl Designer {
             drag: None,
             origin: egui::Pos2::ZERO,
             snap: true,
+            icons: Vec::new(),
             status: String::new(),
             request: None,
             pending: None,
@@ -179,8 +206,7 @@ impl Designer {
                 let dialog = rfd::FileDialog::new()
                     .set_title("Пустая папка нового проекта (имя латиницей)");
                 if let Some(dir) = dialog.pick_folder() {
-                    let library = Path::new(env!("CARGO_MANIFEST_DIR")).with_file_name("rustforms");
-                    match new_project(&dir, &library) {
+                    match crate::create_project(&dir) {
                         Ok(form) => self.open_path(form),
                         Err(error) => self.status = error.to_string(),
                     }
@@ -345,8 +371,18 @@ impl Designer {
 
     fn toolbox(&mut self, ui: &mut egui::Ui) {
         ui.heading("Элементы");
-        for kind in Kind::ALL {
-            let button = egui::Button::new(kind.name())
+        if self.icons.is_empty() {
+            self.icons = Kind::ALL.iter().filter_map(|&k| icon(ui.ctx(), k)).collect();
+        }
+        for (index, kind) in Kind::ALL.into_iter().enumerate() {
+            let button = match self.icons.get(index) {
+                Some(texture) => {
+                    let image = egui::Image::new(texture).fit_to_exact_size(egui::vec2(16.0, 16.0));
+                    egui::Button::image_and_text(image, kind.name())
+                }
+                None => egui::Button::new(kind.name()),
+            };
+            let button = button
                 .selected(self.tool == Some(kind))
                 .sense(Sense::click_and_drag())
                 .min_size(egui::vec2(ui.available_width(), 26.0));

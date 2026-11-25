@@ -3,7 +3,7 @@
 use std::{any::Any, collections::HashMap};
 
 use rustforms::prelude::*;
-use rustforms_model::{Control as Item, FormModel, Kind};
+use rustforms_model::{Align, Control as Item, FormModel, Kind};
 
 /// Контролы предпросмотра: их набор известен только во время работы.
 type Controls = Vec<Box<dyn Any>>;
@@ -56,15 +56,12 @@ fn build(model: &FormModel) -> (Ui, Controls, View<Controls>) {
                 place(target, parent, item, Button::new(text));
             }
             Kind::Label => {
-                let mut label = Label::new(text);
-                if let Some(fore) = color(&item.fore_color) {
-                    label.fore_color = fore;
-                }
-                place(target, parent, item, label);
+                place(target, parent, item, Label::new(text));
             }
             Kind::TextBox => {
                 let mut input = TextBox::new();
                 input.set_multiline(item.multiline);
+                input.set_password(item.password);
                 input.set_text(text);
                 place(target, parent, item, input);
             }
@@ -103,9 +100,6 @@ fn build(model: &FormModel) -> (Ui, Controls, View<Controls>) {
             }
             Kind::Panel => {
                 let mut panel = Panel::new();
-                if let Some(back) = color(&item.back_color) {
-                    panel.back_color = back;
-                }
                 panel.border = item.border;
                 panels.insert(&item.name, place(target, parent, item, panel));
             }
@@ -124,6 +118,23 @@ fn place<T: ControlImpl>(
     // Якоря и Dock уже учтены дизайнером в координатах модели.
     let mut control = control.at(item.x, item.y).size(item.width, item.height);
     control.set_enabled(item.enabled);
+    if let Some(fore) = color(&item.fore_color) {
+        control.set_fore_color(fore);
+    }
+    if let Some(back) = color(&item.back_color) {
+        control.set_back_color(back);
+    }
+    if let Some(size) = item.font_size {
+        control.set_font_size(size);
+    }
+    control.set_bold(item.bold);
+    if let Some(align) = item.align {
+        control.set_text_align(match align {
+            Align::Left => TextAlign::Left,
+            Align::Center => TextAlign::Center,
+            Align::Right => TextAlign::Right,
+        });
+    }
     let index = controls.len();
     controls.push(Box::new(control));
     match parent {

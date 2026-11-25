@@ -12,6 +12,8 @@ pub(crate) struct Items {
     pub top: usize,
     /// Прокрутка колесом меньше строки накапливается здесь.
     wheel: f32,
+    /// Высота строки при прошлой отрисовке; 0 — ещё не рисовали.
+    pub row: f32,
 }
 
 impl Items {
@@ -58,20 +60,27 @@ impl Items {
     }
 
     /// Строка по вертикальной координате внутри списка с рамкой в 1 пиксель.
+    pub fn row_height(&self) -> f32 {
+        self.row.max(ROW)
+    }
+
     pub fn row_at(&self, y: f32) -> Option<usize> {
-        let index = self.top + ((y - 1.0) / ROW).floor().max(0.0) as usize;
+        let index = self.top + ((y - 1.0) / self.row_height()).floor().max(0.0) as usize;
         (y >= 1.0 && index < self.list.len()).then_some(index)
     }
 
     pub fn paint(&mut self, p: &mut Painter, highlight: Option<usize>) {
         let area = p.area();
         let enabled = p.state().enabled;
-        p.fill_rect(area, if enabled { Color::WHITE } else { Color::FORM });
-        let visible = visible_rows(area.height);
+        let back = p.back_color(if enabled { Color::WHITE } else { Color::FORM });
+        p.fill_rect(area, back);
+        self.row = p.text_system().line_height() + 2.0;
+        let height = self.row_height();
+        let visible = (((area.height - 2.0) / height).floor().max(0.0)) as usize;
         self.top = self.top.min(self.list.len().saturating_sub(visible));
-        let ink = if enabled { Color::TEXT } else { Color::TEXT_DISABLED };
+        let ink = p.fore_color(Color::TEXT);
         for (n, index) in (self.top..self.list.len()).take(visible).enumerate() {
-            let row = Rect::new(1.0, 1.0 + n as f32 * ROW, area.width - 2.0, ROW);
+            let row = Rect::new(1.0, 1.0 + n as f32 * height, area.width - 2.0, height);
             if highlight == Some(index) {
                 p.fill_rect(row, Color::SELECTION);
             }

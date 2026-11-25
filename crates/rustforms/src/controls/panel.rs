@@ -4,13 +4,12 @@ use crate::{Color, ControlBase, Control, ControlImpl, Painter};
 #[derive(Control)]
 pub struct Panel {
     base: ControlBase,
-    pub back_color: Color,
     pub border: bool,
 }
 
 impl Panel {
     pub fn new() -> Self {
-        Self { base: ControlBase::new(200.0, 100.0, false), back_color: Color::FORM, border: true }
+        Self { base: ControlBase::new(200.0, 100.0, false), border: true }
     }
 }
 
@@ -31,7 +30,8 @@ impl ControlImpl for Panel {
 
     fn on_paint(&mut self, p: &mut Painter) {
         let area = p.area();
-        p.fill_rect(area, self.back_color);
+        let back = p.back_color(Color::FORM);
+        p.fill_rect(area, back);
         if self.border {
             p.stroke_rect(area, Color::BORDER, 1.0);
         }

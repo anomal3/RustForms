@@ -1,6 +1,6 @@
 //! Несколько окон: открытие второй формы из первой.
 
-use std::any::Any;
+use std::{any::Any, time::Instant};
 
 use tiny_skia::Pixmap;
 
@@ -24,6 +24,11 @@ pub(crate) trait AnyForm {
     fn close_popups(&mut self);
     fn render(&mut self, pixmap: &mut Pixmap, scale: f32);
     fn finish(&mut self, done: Done, child: &mut dyn Any, accepted: bool);
+    fn try_close(&mut self) -> bool;
+    fn resized(&mut self);
+    fn raw_key(&mut self, key: &str, mods: Modifiers, pressed: bool);
+    fn tooltip_deadline(&mut self) -> Option<Instant>;
+    fn tick(&mut self, now: Instant) -> bool;
 }
 
 impl<S: 'static> AnyForm for Application<S> {
@@ -82,6 +87,26 @@ impl<S: 'static> AnyForm for Application<S> {
     fn finish(&mut self, done: Done, child: &mut dyn Any, accepted: bool) {
         done(&mut self.state, child, accepted, &mut self.ui);
         self.layout();
+    }
+
+    fn try_close(&mut self) -> bool {
+        Application::try_close(self)
+    }
+
+    fn resized(&mut self) {
+        Application::resized(self);
+    }
+
+    fn raw_key(&mut self, key: &str, mods: Modifiers, pressed: bool) {
+        Application::raw_key(self, key, mods, pressed);
+    }
+
+    fn tooltip_deadline(&mut self) -> Option<Instant> {
+        Application::tooltip_deadline(self)
+    }
+
+    fn tick(&mut self, now: Instant) -> bool {
+        Application::tick(self, now)
     }
 }
 

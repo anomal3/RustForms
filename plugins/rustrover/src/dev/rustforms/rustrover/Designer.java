@@ -8,6 +8,8 @@ import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.PathManager;
+import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
@@ -42,7 +44,8 @@ final class Designer {
 
     /** Выбранный раньше путь, иначе записанный при сборке плагина; null — не найден. */
     static String knownExecutable() {
-        for (String candidate : new String[] {PropertiesComponent.getInstance().getValue(PATH_KEY), builtInPath()}) {
+        String[] candidates = {PropertiesComponent.getInstance().getValue(PATH_KEY), builtInPath(), bundledPath()};
+        for (String candidate : candidates) {
             if (candidate != null && Files.isRegularFile(Path.of(candidate))) {
                 return candidate;
             }
@@ -64,6 +67,17 @@ final class Designer {
         }
         PropertiesComponent.getInstance().setValue(PATH_KEY, chosen.getPath());
         return chosen.getPath();
+    }
+
+    /** Дизайнер, вложенный в плагин из релиза: {@code rustforms/bin} рядом с {@code lib}. */
+    private static String bundledPath() {
+        String jar = PathManager.getJarPathForClass(Designer.class);
+        if (jar == null) {
+            return null;
+        }
+        Path plugin = Path.of(jar).getParent().getParent();
+        String name = SystemInfo.isWindows ? "rustforms-designer.exe" : "rustforms-designer";
+        return plugin.resolve("bin").resolve(name).toString();
     }
 
     private static String builtInPath() {
