@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>dev.rustforms.rustrover</id>
     <name>RustForms</name>
-    <version>0.7.0</version>
+    <version>0.12.0</version>
     <vendor>RustForms</vendor>
     <description><![CDATA[
     Дизайнер форм RustForms: новый проект и форма, открытие дизайнера, переход

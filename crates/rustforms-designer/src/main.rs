@@ -3,6 +3,7 @@
 mod app;
 mod canvas;
 mod document;
+mod pickers;
 mod preview;
 mod properties;
 mod render;

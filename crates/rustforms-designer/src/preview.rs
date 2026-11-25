@@ -1,5 +1,7 @@
 //! Картинка формы, нарисованная самим движком RustForms, — вид как у готовой программы.
 
+use std::path::Path;
+
 use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions};
 use rustforms_model::FormModel;
 
@@ -13,15 +15,24 @@ pub struct Preview {
 }
 
 impl Preview {
-    pub fn texture(&mut self, ctx: &egui::Context, model: &FormModel) -> Option<&TextureHandle> {
+    pub fn texture(
+        &mut self,
+        ctx: &egui::Context,
+        model: &FormModel,
+        folder: &Path,
+    ) -> Option<&TextureHandle> {
         let scale = ctx.pixels_per_point();
         if self.drawn.as_ref().is_none_or(|(m, s)| m != model || *s != scale) {
-            let pixmap = self.renderer.render(model, scale)?;
+            let pixmap = self.renderer.render(model, scale, folder)?;
             let size = [pixmap.width() as usize, pixmap.height() as usize];
             let image = ColorImage::from_rgba_premultiplied(size, pixmap.data());
             self.texture = Some(ctx.load_texture("form", image, TextureOptions::LINEAR));
             self.drawn = Some((model.clone(), scale));
         }
         self.texture.as_ref()
+    }
+
+    pub fn tab_edges(&self) -> Vec<(String, Vec<f32>)> {
+        self.renderer.tab_edges()
     }
 }

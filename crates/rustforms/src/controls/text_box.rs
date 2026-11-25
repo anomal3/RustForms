@@ -344,6 +344,15 @@ impl ControlImpl for TextBox {
         self.move_to(index, true);
     }
 
+    fn default_context(&self) -> Vec<(&'static str, Key)> {
+        vec![
+            ("Вырезать", Key::Cut),
+            ("Копировать", Key::Copy),
+            ("Вставить", Key::Paste),
+            ("Выделить всё", Key::SelectAll),
+        ]
+    }
+
     fn on_wheel(&mut self, lines: f32, _cx: &mut EventCx) {
         if self.multiline {
             self.wheel += lines;

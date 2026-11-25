@@ -1,8 +1,9 @@
 use std::{any::Any, cell::Cell, cell::RefCell, ops::Deref, rc::Rc};
 
 use crate::{
-    AnyControl, CheckBox, ComboBox, Container, ControlId, ControlImpl, Handle, ListBox, MenuStrip,
-    Modifiers, RadioButton, TextBox, Ui,
+    AnyControl, CheckBox, ComboBox, Container, ControlId, ControlImpl, DataGridView, Handle,
+    ListBox, MenuStrip, Modifiers, NumericUpDown, RadioButton, TabControl, TextBox, Timer, TrackBar,
+    TreeView, Ui, DateTimePicker, ToolStrip,
 };
 
 /// [`TextBox`] и всё, что от него «унаследовано».
@@ -16,15 +17,31 @@ impl RaisesCheckedChanged for CheckBox {}
 impl RaisesCheckedChanged for RadioButton {}
 impl<T: Deref> RaisesCheckedChanged for T where T::Target: RaisesCheckedChanged {}
 
-/// [`ListBox`], [`ComboBox`] и всё, что от них «унаследовано».
+/// [`DataGridView`] и всё, что от него «унаследовано».
+pub trait RaisesCellChanged {}
+impl RaisesCellChanged for DataGridView {}
+impl<T: Deref> RaisesCellChanged for T where T::Target: RaisesCellChanged {}
+
+/// [`NumericUpDown`], [`TrackBar`] и всё, что от них «унаследовано».
+pub trait RaisesValueChanged {}
+impl RaisesValueChanged for NumericUpDown {}
+impl RaisesValueChanged for TrackBar {}
+impl<T: Deref> RaisesValueChanged for T where T::Target: RaisesValueChanged {}
+
+/// [`ListBox`], [`ComboBox`], [`DataGridView`], [`TreeView`] и всё, что от них «унаследовано».
 pub trait RaisesSelectedChanged {}
 impl RaisesSelectedChanged for ListBox {}
 impl RaisesSelectedChanged for ComboBox {}
+impl RaisesSelectedChanged for DataGridView {}
+impl RaisesSelectedChanged for TabControl {}
+impl RaisesSelectedChanged for DateTimePicker {}
+impl RaisesSelectedChanged for TreeView {}
 impl<T: Deref> RaisesSelectedChanged for T where T::Target: RaisesSelectedChanged {}
 
 /// [`MenuStrip`] и всё, что от него «унаследовано».
 pub trait RaisesItemClicked {}
 impl RaisesItemClicked for MenuStrip {}
+impl RaisesItemClicked for ToolStrip {}
 impl<T: Deref> RaisesItemClicked for T where T::Target: RaisesItemClicked {}
 
 #[derive(Clone, Copy, Debug)]
@@ -82,6 +99,27 @@ pub struct FocusArgs {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub struct ValueChangedArgs {
+    pub sender: ControlId,
+    pub value: i32,
+}
+
+/// Пользователь изменил ячейку таблицы.
+#[derive(Clone, Debug)]
+pub struct CellChangedArgs {
+    pub sender: ControlId,
+    pub row: usize,
+    pub column: usize,
+    pub text: String,
+}
+
+/// Сработал таймер.
+#[derive(Clone, Copy, Debug)]
+pub struct TickArgs {
+    pub sender: ControlId,
+}
+
+#[derive(Clone, Copy, Debug)]
 pub struct LoadArgs;
 
 #[derive(Clone, Copy, Debug)]
@@ -118,6 +156,10 @@ pub(crate) enum EventKind {
     CheckedChanged,
     SelectedChanged,
     ItemClicked,
+    ValueChanged,
+    Tick,
+    CellChanged,
+    ContextItemClicked,
     MouseEnter,
     MouseLeave,
     MouseDown,
@@ -136,6 +178,8 @@ pub(crate) enum Signal {
     CheckedChanged(bool),
     SelectedChanged(Option<usize>, String),
     ItemClicked(String),
+    ValueChanged(i32),
+    CellChanged(usize, usize, String),
 }
 
 type Handler<S> = Box<dyn FnMut(&mut S, &mut Ui, &dyn Any)>;
@@ -145,6 +189,11 @@ pub(crate) struct Node<S> {
     pub id: ControlId,
     pub parent: Option<ControlId>,
     pub get: Getter<S>,
+}
+
+pub(crate) struct TimerSlot<S> {
+    pub id: ControlId,
+    pub get: Box<dyn Fn(&mut S) -> &mut Timer>,
 }
 
 /// Помогает компилятору вывести замыкание с «любым» временем жизни.
@@ -162,13 +211,14 @@ fn getter<S>(get: impl Fn(&mut S) -> &mut (dyn AnyControl + 'static) + 'static) 
 /// пользователя: изменение свойства из кода их не вызывает.
 pub struct View<S> {
     pub(crate) nodes: Vec<Node<S>>,
+    pub(crate) timers: Vec<TimerSlot<S>>,
     /// `None` вместо номера — событие самой формы.
     handlers: Vec<(Option<ControlId>, EventKind, Handler<S>)>,
 }
 
 impl<S> Default for View<S> {
     fn default() -> Self {
-        Self { nodes: Vec::new(), handlers: Vec::new() }
+        Self { nodes: Vec::new(), timers: Vec::new(), handlers: Vec::new() }
     }
 }
 
@@ -233,6 +283,21 @@ impl<S: 'static> View<S> {
         self.handlers.push((sender, kind, erased));
     }
 
+    /// Подключает таймер из поля структуры: `view.add_timer(|f| &mut f.timer1)`.
+    pub fn add_timer(&mut self, field: impl Fn(&mut S) -> &mut Timer + 'static) -> Handle<Timer> {
+        let handle = Handle::<Timer>::fresh();
+        self.timers.push(TimerSlot { id: handle.id(), get: Box::new(field) });
+        handle
+    }
+
+    pub fn on_tick(
+        &mut self,
+        timer: Handle<Timer>,
+        handler: impl FnMut(&mut S, &mut Ui, &TickArgs) + 'static,
+    ) {
+        self.subscribe(Some(timer.id()), EventKind::Tick, handler);
+    }
+
     pub fn on_load(&mut self, handler: impl FnMut(&mut S, &mut Ui, &LoadArgs) + 'static) {
         self.subscribe(None, EventKind::Load, handler);
     }
@@ -253,6 +318,10 @@ impl<S: 'static> View<S> {
         on_checked_changed<RaisesCheckedChanged> => CheckedChanged, CheckedChangedArgs;
         on_selected_changed<RaisesSelectedChanged> => SelectedChanged, SelectedChangedArgs;
         on_item_clicked<RaisesItemClicked> => ItemClicked, MenuItemArgs;
+        on_value_changed<RaisesValueChanged> => ValueChanged, ValueChangedArgs;
+        on_cell_changed<RaisesCellChanged> => CellChanged, CellChangedArgs;
+        /// Выбран пункт меню по правой кнопке.
+        on_context_item_clicked => ContextItemClicked, MenuItemArgs;
         on_mouse_enter => MouseEnter, MouseArgs;
         on_mouse_leave => MouseLeave, MouseArgs;
         on_mouse_down => MouseDown, MouseArgs;
@@ -280,6 +349,10 @@ impl<S: 'static> View<S> {
                 parent: node.parent,
                 get: getter(move |state| get(part(state))),
             }
+        }));
+        self.timers.extend(inner.timers.into_iter().map(|slot| {
+            let get = slot.get;
+            TimerSlot { id: slot.id, get: Box::new(move |state: &mut S| get(part(state))) }
         }));
         self.handlers.extend(inner.handlers.into_iter().map(|(sender, kind, handler)| {
             let handler = Rc::new(RefCell::new(handler));
@@ -329,6 +402,14 @@ impl<S: 'static> View<S> {
             Signal::SelectedChanged(index, text) => {
                 let args = SelectedChangedArgs { sender, index, text };
                 self.emit(from, EventKind::SelectedChanged, &args, state, ui)
+            }
+            Signal::CellChanged(row, column, text) => {
+                let args = CellChangedArgs { sender, row, column, text };
+                self.emit(from, EventKind::CellChanged, &args, state, ui)
+            }
+            Signal::ValueChanged(value) => {
+                let args = ValueChangedArgs { sender, value };
+                self.emit(from, EventKind::ValueChanged, &args, state, ui)
             }
             Signal::ItemClicked(item) => {
                 let args = MenuItemArgs { sender, item };

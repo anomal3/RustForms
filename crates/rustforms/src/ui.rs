@@ -5,11 +5,18 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use crate::{Color, Panel, forms::PendingForm};
+use crate::{
+    Color, GroupBox, Panel, SplitContainer, SplitPanel, TabControl, TabPage, forms::PendingForm,
+};
 
 /// Контролы, внутрь которых можно класть другие: [`Panel`] и «унаследованные» от неё.
 pub trait Container {}
 impl Container for Panel {}
+impl Container for GroupBox {}
+impl Container for TabControl {}
+impl Container for TabPage {}
+impl Container for SplitContainer {}
+impl Container for SplitPanel {}
 impl<T: Deref> Container for T where T::Target: Container {}
 
 /// Номер контрола на форме; по нему различаются отправители событий (`e.sender`).

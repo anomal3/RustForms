@@ -228,14 +228,14 @@ fn map_key(code: KeyCode, mods: Modifiers) -> Option<Key> {
 
 impl ApplicationHandler for Host {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        // Единственное, что происходит без событий, — появление подсказки.
+        // Без событий происходят только таймеры и появление подсказки.
         let now = Instant::now();
         let mut next: Option<Instant> = None;
         for open in self.windows.values_mut() {
             if open.form.form.tick(now) {
                 open.window.request_redraw();
             }
-            if let Some(at) = open.form.form.tooltip_deadline() {
+            if let Some(at) = open.form.form.next_wakeup() {
                 next = Some(next.map_or(at, |n| n.min(at)));
             }
         }
@@ -301,6 +301,9 @@ impl ApplicationHandler for Host {
                 ElementState::Pressed => form.mouse_down(mods),
                 ElementState::Released => form.mouse_up(),
             },
+            WindowEvent::MouseInput {
+                state: ElementState::Released, button: MouseButton::Right, ..
+            } => form.context_click(),
             WindowEvent::MouseWheel { delta, .. } => {
                 let lines = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y * 3.0,

@@ -3,6 +3,7 @@
 use eframe::egui::{
     self, Align2, Color32, CursorIcon, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2,
 };
+use rustforms_model::Kind;
 
 use crate::app::{Designer, Request};
 
@@ -53,6 +54,7 @@ impl Designer {
             });
             return;
         };
+        let folder = open.path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
         let document = &mut open.document;
         let size = Vec2::new(document.model.form.width, document.model.form.height);
         let wanted = size + Vec2::new(MARGIN * 2.0, MARGIN * 2.0 + TITLE);
@@ -73,7 +75,7 @@ impl Designer {
             FontId::proportional(13.0),
             Color32::WHITE,
         );
-        if let Some(texture) = self.preview.texture(ui.ctx(), &document.model) {
+        if let Some(texture) = self.preview.texture(ui.ctx(), &document.model, &folder) {
             let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
             painter.image(texture.id(), client, uv, Color32::WHITE);
         }
@@ -82,6 +84,9 @@ impl Designer {
             Rect::from_min_size(origin + Vec2::new(x, y), Vec2::new(w, h))
         };
         for control in &document.model.controls {
+            if document.hidden(&control.name) {
+                continue;
+            }
             let Some(frame) = document.frame(&control.name) else { continue };
             let rect = on_screen(frame);
             if !control.visible {
@@ -144,7 +149,9 @@ impl Designer {
                 && client.contains(p)
             {
                 let (x, y) = local(p);
-                document.add(kind, snap(x), snap(y));
+                if document.add(kind, snap(x), snap(y)).is_none() {
+                    self.status = "TabPage добавляется щелчком по TabControl".into();
+                }
                 self.tool = None;
             }
             if released {
@@ -178,6 +185,17 @@ impl Designer {
             } else {
                 let (x, y) = local(p);
                 let hit = document.hit(x, y, None).map(str::to_owned);
+                // Щелчок по ярлычку вкладки переключает страницу.
+                if let Some(name) = &hit
+                    && let Some((fx, fy, ..)) = document.frame(name)
+                    && y - fy < Kind::TAB_HEADER
+                    && let Some((_, edges)) =
+                        self.preview.tab_edges().into_iter().find(|(tabs, _)| tabs == name)
+                    && let Some(page) =
+                        edges.windows(2).position(|e| x - fx >= e[0] && x - fx < e[1])
+                {
+                    document.show_page(name, page);
+                }
                 document.selected = hit.clone();
                 document.end_merge();
                 hit.and_then(|name| {

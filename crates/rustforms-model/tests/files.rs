@@ -90,9 +90,37 @@ fn every_kind_survives_save_and_generates_setup() {
     for kind in Kind::ALL {
         let name = model.free_name(kind);
         let mut c = Control::new(kind, name, 1.0, 2.0);
+        if kind == Kind::TabPage {
+            c.parent = Some("tab_control1".into());
+        }
+        if kind == Kind::SplitPanel {
+            c.parent = Some("split_container1".into());
+        }
+        if kind == Kind::DateTimePicker {
+            c.date = Some("2026-02-28".into());
+        }
+        if kind == Kind::SplitContainer {
+            (c.distance, c.horizontal) = (80, true);
+        }
+        if kind == Kind::DataGridView {
+            c.editable = true;
+            c.context = vec!["Удалить".into()];
+            c.events.insert(Event::CellChanged, "cell".into());
+            c.events.insert(Event::ContextItemClicked, "menu".into());
+        }
+        if kind == Kind::Timer {
+            (c.interval, c.enabled) = (250, true);
+            c.events.insert(Event::Tick, "tick".into());
+        }
         if kind.has_items() {
             c.items = vec!["a \"b\"".into(), "в".into()];
-            c.selected = Some(1);
+            c.selected = kind.selectable().then_some(1);
+        }
+        if kind == Kind::PictureBox {
+            c.image = Some("pic\\logo.png".into());
+        }
+        if matches!(kind, Kind::NumericUpDown | Kind::TrackBar) {
+            c.value = 3;
         }
         if kind.checkable() {
             c.checked = true;
@@ -115,9 +143,27 @@ fn every_kind_survives_save_and_generates_setup() {
         "radio_button1.set_checked(true);",
         "progress_bar1.set_range(5, 50);",
         "menu_strip1.set_dock(Dock::Top);",
+        "status_strip1.set_dock(Dock::Bottom);",
+        "data_grid_view1.set_columns([",
+        "picture_box1.set_image_png(include_bytes!(\"pic/logo.png\"));",
+        "track_bar1.set_value(3);",
+        "view.add_to(tab_control1_id, |f: &mut Self| &mut f.tab_page1);",
+        "let mut timer1 = Timer::new(250);\n        timer1.start();",
+        "let timer1_id = view.add_timer(|f: &mut Self| &mut f.timer1);",
+        "view.on_tick(timer1_id, Self::tick);",
+        "date_time_picker1.set_value(Date::new(2026, 2, 28));",
+        "split_container1.set_distance(80.0);",
+        "data_grid_view1.set_editable(true);",
+        "data_grid_view1.set_context_menu([\"Удалить\"]);",
+        "view.on_cell_changed(data_grid_view1_id, Self::cell);",
+        "view.on_context_item_clicked(data_grid_view1_id, Self::menu);",
     ] {
         assert!(code.contains(part), "{part}\n{code}");
     }
+    let date = model.controls.iter_mut().find(|c| c.name == "date_time_picker1").unwrap();
+    date.date = Some("2026-02-30".into());
+    assert!(model.validate().is_err());
+    model.controls.iter_mut().find(|c| c.name == "date_time_picker1").unwrap().date = None;
     model.controls.iter_mut().find(|c| c.name == "list_box1").unwrap().selected = Some(9);
     assert!(model.validate().is_err());
 }

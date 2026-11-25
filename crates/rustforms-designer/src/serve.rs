@@ -96,7 +96,10 @@ impl Server {
                     .into_iter()
                     .find(|k| Some(k.name()) == text("kind"))
                     .ok_or("неизвестный тип контрола")?;
-                let added = self.document.add(kind, need(number("x"))?, need(number("y"))?);
+                let added = self
+                    .document
+                    .add(kind, need(number("x"))?, need(number("y"))?)
+                    .ok_or("TabPage добавляется щелчком по TabControl")?;
                 reply.insert("select".into(), added.into());
             }
             "bounds" => {
@@ -147,6 +150,11 @@ impl Server {
             "back" => {
                 let target = existing()?;
                 self.document.send_to_back(&target);
+            }
+            "page" => {
+                let target = existing()?;
+                let index = need(number("index"))?;
+                self.document.show_page(&target, index.max(0.0) as usize);
             }
             "undo" => self.document.undo(),
             "redo" => self.document.redo(),
@@ -249,6 +257,23 @@ impl Server {
                 "fore_color" => c.fore_color = optional,
                 "back_color" => c.back_color = optional,
                 "custom" => c.custom = optional,
+                "image" => c.image = optional,
+                "interval" => c.interval = number.map_or(c.interval, |v| v.max(1.0) as u32),
+                "date" => c.date = optional,
+                "editable" => c.editable = flag.unwrap_or(c.editable),
+                "horizontal" => c.horizontal = flag.unwrap_or(c.horizontal),
+                "distance" => c.distance = number.map_or(c.distance, |v| v.max(20.0) as u32),
+                "context" => {
+                    c.context = match list.as_ref() {
+                        Some(items) => items.clone(),
+                        None => text
+                            .split([';', '\n'])
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_owned)
+                            .collect(),
+                    };
+                }
                 // 0 или пусто — обычный шрифт.
                 "font_size" => c.font_size = number.filter(|&v| v > 0.0),
                 "bold" => c.bold = flag.unwrap_or(c.bold),
@@ -306,6 +331,10 @@ impl Server {
                     "font_size": c.font_size, "bold": c.bold, "tooltip": c.tooltip,
                     "tab_index": c.tab_index, "align": c.align.map(Align::name),
                     "read_only": c.read_only, "password": c.password,
+                    "image": c.image, "interval": c.interval,
+                    "context": c.context, "date": c.date, "editable": c.editable,
+                    "horizontal": c.horizontal, "distance": c.distance,
+                    "hidden": self.document.hidden(&c.name),
                     "dock": c.dock.name(), "multiline": c.multiline, "items": c.items,
                     "selected": c.selected, "value": c.value, "minimum": c.minimum,
                     "maximum": c.maximum,
@@ -318,9 +347,16 @@ impl Server {
         let form = &model.form;
         let image = self
             .renderer
-            .render(model, self.scale)
+            .render(model, self.scale, self.path.parent().unwrap_or(Path::new(".")))
             .and_then(|p| p.encode_png().ok())
             .map(|png| base64::engine::general_purpose::STANDARD.encode(png));
+        // Края ярлычков известны после отрисовки.
+        let mut controls = controls;
+        for (name, edges) in self.renderer.tab_edges() {
+            if let Some(c) = controls.iter_mut().find(|c| c["name"] == name.as_str()) {
+                c["tabs"] = json!(edges);
+            }
+        }
         json!({
             "form": {
                 "name": form.name, "title": form.title, "width": form.width,

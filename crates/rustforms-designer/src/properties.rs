@@ -1,11 +1,12 @@
 //! Правая панель: свойства и события выбранного контрола или самой формы.
 
 use eframe::egui::{self, DragValue, Grid, TextEdit};
-use rustforms_model::{Align, Dock, Event, Kind, Side};
+use rustforms_model::{Align, Dock, Event, Kind};
 
 use crate::{
     app::{Designer, Request},
     document::Document,
+    pickers,
 };
 
 /// Поле, значение которого применяется после ввода целиком (имя, путь): пока текст
@@ -153,6 +154,7 @@ fn control_properties(
     ui.heading(c.kind.name());
     let mut rename = None;
     let mut custom = None;
+    let mut date = None;
     Grid::new(("control", name)).num_columns(2).show(ui, |ui| {
         ui.label("Имя");
         rename = committed(ui, &format!("name {name}"), &c.name);
@@ -196,11 +198,18 @@ fn control_properties(
                 }
                 ui.end_row();
             }
-            Kind::ComboBox | Kind::ListBox | Kind::MenuStrip => {
-                let hint = if c.kind == Kind::MenuStrip {
-                    "Пункты вида Меню/Пункт; Меню/- это разделитель"
-                } else {
-                    "Каждая строка списка с новой строки"
+            Kind::ComboBox
+            | Kind::ListBox
+            | Kind::MenuStrip
+            | Kind::DataGridView
+            | Kind::TreeView
+            | Kind::ToolStrip => {
+                let hint = match c.kind {
+                    Kind::MenuStrip => "Пункты вида Меню/Пункт; Меню/- это разделитель",
+                    Kind::DataGridView => "Заголовки столбцов, каждый с новой строки",
+                    Kind::ToolStrip => "Кнопки, каждая с новой строки; - это разделитель",
+                    Kind::TreeView => "Узлы вида Корень/Ветка/Лист",
+                    _ => "Каждая строка списка с новой строки",
                 };
                 ui.label("Строки").on_hover_text(hint);
                 // Пустая последняя строка нужна, пока набирается следующая.
@@ -220,6 +229,11 @@ fn control_properties(
                     ui.data_mut(|d| d.remove_temp::<String>(id));
                 }
                 ui.end_row();
+                if c.kind == Kind::DataGridView {
+                    ui.label("Правка ячеек");
+                    ui.checkbox(&mut c.editable, "");
+                    ui.end_row();
+                }
                 if c.kind.selectable() {
                     ui.label("Выбрана");
                     egui::ComboBox::from_id_salt(("selected", name))
@@ -233,7 +247,15 @@ fn control_properties(
                     ui.end_row();
                 }
             }
-            Kind::ProgressBar => {
+            Kind::PictureBox => {
+                ui.label("Файл PNG").on_hover_text("Путь от папки формы, например logo.png");
+                let mut path = c.image.clone().unwrap_or_default();
+                if ui.add(TextEdit::singleline(&mut path).desired_width(f32::INFINITY)).changed() {
+                    c.image = (!path.is_empty()).then_some(path);
+                }
+                ui.end_row();
+            }
+            Kind::ProgressBar | Kind::NumericUpDown | Kind::TrackBar => {
                 for (label, value) in [
                     ("Минимум", &mut c.minimum),
                     ("Максимум", &mut c.maximum),
@@ -251,8 +273,40 @@ fn control_properties(
                 ui.checkbox(&mut c.border, "");
                 ui.end_row();
             }
-            Kind::Button => {}
+            Kind::Button
+            | Kind::GroupBox
+            | Kind::LinkLabel
+            | Kind::StatusStrip
+            | Kind::TabPage
+            | Kind::SplitPanel => {}
+            Kind::DateTimePicker => {
+                ui.label("Дата").on_hover_text("ГГГГ-ММ-ДД; пусто — сегодняшняя");
+                date = committed(ui, &format!("date {name}"), c.date.as_deref().unwrap_or(""));
+                ui.end_row();
+            }
+            Kind::SplitContainer => {
+                ui.label("Разделитель");
+                ui.add(DragValue::new(&mut c.distance).range(20..=4000));
+                ui.end_row();
+                ui.label("Горизонтальный");
+                ui.checkbox(&mut c.horizontal, "");
+                ui.end_row();
+            }
+            Kind::TabControl => {
+                ui.label("Страница");
+                let mut page = c.selected.unwrap_or(0);
+                if ui.add(DragValue::new(&mut page).range(0..=99)).changed() {
+                    c.selected = Some(page);
+                }
+                ui.end_row();
+            }
+            Kind::Timer => {
+                ui.label("Интервал, мс");
+                ui.add(DragValue::new(&mut c.interval).range(1..=3_600_000));
+                ui.end_row();
+            }
         }
+        if c.kind != Kind::Timer {
         color_row(ui, "Цвет текста", &mut c.fore_color);
         color_row(ui, "Фон", &mut c.back_color);
         ui.label("Шрифт");
@@ -275,7 +329,7 @@ fn control_properties(
             ui.add(DragValue::new(&mut c.tab_index));
             ui.end_row();
         }
-        if matches!(c.kind, Kind::Button | Kind::Label) {
+        if matches!(c.kind, Kind::Button | Kind::Label | Kind::LinkLabel | Kind::StatusStrip) {
             ui.label("Выравнивание");
             egui::ComboBox::from_id_salt(("align", name))
                 .selected_text(c.align.map_or("по умолчанию", Align::name))
@@ -296,30 +350,27 @@ fn control_properties(
             ui.end_row();
         }
         ui.label("Dock");
-        egui::ComboBox::from_id_salt(("dock", name))
-            .selected_text(c.dock.name())
-            .show_ui(ui, |ui| {
-                for dock in Dock::ALL {
-                    ui.selectable_value(&mut c.dock, dock, dock.name());
-                }
-            });
+        pickers::dock(ui, &mut c.dock);
         ui.end_row();
-        ui.label("Якорь");
-        ui.add_enabled_ui(c.dock == Dock::None, |ui| {
-            ui.horizontal(|ui| {
-                for side in Side::ALL {
-                    let mut on = c.anchor.contains(&side);
-                    if ui.checkbox(&mut on, side.name()).changed() {
-                        if on {
-                            c.anchor.insert(side);
-                        } else {
-                            c.anchor.remove(&side);
-                        }
-                    }
-                }
-            });
-        });
+        ui.label("Anchor");
+        if let Some(side) = pickers::anchor(ui, |side| c.anchor.contains(&side)) {
+            if !c.anchor.remove(&side) {
+                c.anchor.insert(side);
+            }
+            // Как в WinForms: якоря и Dock исключают друг друга.
+            c.dock = Dock::None;
+        }
         ui.end_row();
+        }
+        if c.kind != Kind::Timer {
+            ui.label("Меню (правая кнопка)").on_hover_text("Пункты через ;");
+            let current = c.context.join("; ");
+            if let Some(text) = committed(ui, &format!("context {name}"), &current) {
+                c.context =
+                    text.split(';').map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned).collect();
+            }
+            ui.end_row();
+        }
         ui.label("Свой тип").on_hover_text(
             "Путь к своему контролу на базе этого, например crate::round_button::RoundButton. \
              Тип должен реализовывать Default.",
@@ -356,6 +407,13 @@ fn control_properties(
         if let Some(target) = document.control_mut(name) {
             *target = c;
         }
+    }
+    if let Some(value) = date {
+        document.edit(|m| {
+            if let Some(c) = m.controls.iter_mut().find(|c| c.name == name) {
+                c.date = (!value.is_empty()).then_some(value);
+            }
+        })?;
     }
     if let Some(value) = custom {
         document.edit(|m| {

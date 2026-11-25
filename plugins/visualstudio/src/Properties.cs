@@ -17,8 +17,6 @@ namespace RustForms.VisualStudio
 
     internal enum TextAlignment { Default, Left, Center, Right }
 
-    internal enum DockSide { None, Top, Bottom, Left, Right, Fill }
-
     internal abstract class PropertiesBase : ICustomTypeDescriptor
     {
         // Шапка окна Properties берёт отсюда имя и тип; остальное — обычное поведение.
@@ -130,25 +128,39 @@ namespace RustForms.VisualStudio
         public int Height { get => Number("height"); set => Set("height", value); }
 
         [Category("Расположение"), DisplayName("Dock")]
-        public DockSide Dock
+        public System.Windows.Forms.DockStyle Dock
         {
-            get => (DockSide)System.Enum.Parse(typeof(DockSide), Get("dock"), true);
+            get => (System.Windows.Forms.DockStyle)System.Enum.Parse(typeof(System.Windows.Forms.DockStyle), Get("dock"), true);
             set => Set("dock", value.ToString().ToLowerInvariant());
         }
 
-        private bool Anchored(string side) => ((JArray)Data["anchor"]).Any(s => (string)s == side);
+        // Тип из WinForms приносит с собой родной квадрат выбора якорей.
+        [Category("Расположение"), DisplayName("Anchor")]
+        public System.Windows.Forms.AnchorStyles Anchor
+        {
+            get => ((JArray)Data["anchor"]).Aggregate(System.Windows.Forms.AnchorStyles.None,
+                (all, side) => all | Style((string)side));
+            set
+            {
+                var before = Anchor;
+                // Как в WinForms: якоря и Dock исключают друг друга.
+                if (Get("dock") != "none")
+                {
+                    Set("dock", "none");
+                }
+                foreach (var side in new[] { "left", "top", "right", "bottom" })
+                {
+                    var on = (value & Style(side)) != 0;
+                    if (on != ((before & Style(side)) != 0))
+                    {
+                        Set("anchor:" + side, on);
+                    }
+                }
+            }
+        }
 
-        [Category("Расположение"), DisplayName("Якорь слева")]
-        public bool AnchorLeft { get => Anchored("left"); set => Set("anchor:left", value); }
-
-        [Category("Расположение"), DisplayName("Якорь сверху")]
-        public bool AnchorTop { get => Anchored("top"); set => Set("anchor:top", value); }
-
-        [Category("Расположение"), DisplayName("Якорь справа")]
-        public bool AnchorRight { get => Anchored("right"); set => Set("anchor:right", value); }
-
-        [Category("Расположение"), DisplayName("Якорь снизу")]
-        public bool AnchorBottom { get => Anchored("bottom"); set => Set("anchor:bottom", value); }
+        private static System.Windows.Forms.AnchorStyles Style(string side) =>
+            (System.Windows.Forms.AnchorStyles)System.Enum.Parse(typeof(System.Windows.Forms.AnchorStyles), side, true);
 
         [Category("Поведение"), DisplayName("Видимый")]
         public bool Visible { get => Flag("visible"); set => Set("visible", value); }
@@ -193,6 +205,25 @@ namespace RustForms.VisualStudio
 
         [ControlEvent("selected_changed"), Category("События"), DisplayName("selected_changed")]
         public string OnSelectedChanged { get => Handler("selected_changed"); set => SetHandler("selected_changed", value); }
+
+        [Category("Поведение"), DisplayName("Меню правой кнопки")]
+        public string[] ContextMenu
+        {
+            get => ((JArray)Data["context"]).Select(i => (string)i).ToArray();
+            set => Set("context", value);
+        }
+
+        [ControlEvent("cell_changed"), Category("События"), DisplayName("cell_changed")]
+        public string OnCellChanged { get => Handler("cell_changed"); set => SetHandler("cell_changed", value); }
+
+        [ControlEvent("context_item_clicked"), Category("События"), DisplayName("context_item_clicked")]
+        public string OnContextItemClicked { get => Handler("context_item_clicked"); set => SetHandler("context_item_clicked", value); }
+
+        [ControlEvent("tick"), Category("События"), DisplayName("tick")]
+        public string OnTick { get => Handler("tick"); set => SetHandler("tick", value); }
+
+        [ControlEvent("value_changed"), Category("События"), DisplayName("value_changed")]
+        public string OnValueChanged { get => Handler("value_changed"); set => SetHandler("value_changed", value); }
 
         [ControlEvent("item_clicked"), Category("События"), DisplayName("item_clicked")]
         public string OnItemClicked { get => Handler("item_clicked"); set => SetHandler("item_clicked", value); }
@@ -253,7 +284,21 @@ namespace RustForms.VisualStudio
                 case "RadioButton": return new CheckBoxPropertiesObject(controller, control);
                 case "ComboBox":
                 case "ListBox": return new ListPropertiesObject(controller, control);
-                case "ProgressBar": return new ProgressBarPropertiesObject(controller, control);
+                case "ProgressBar":
+                case "NumericUpDown":
+                case "TrackBar": return new ProgressBarPropertiesObject(controller, control);
+                case "GroupBox":
+                case "LinkLabel":
+                case "StatusStrip": return new ButtonPropertiesObject(controller, control);
+                case "DataGridView":
+                case "TreeView": return new MenuStripPropertiesObject(controller, control);
+                case "PictureBox": return new PicturePropertiesObject(controller, control);
+                case "TabPage": return new ButtonPropertiesObject(controller, control);
+                case "TabControl": return new TabControlPropertiesObject(controller, control);
+                case "Timer": return new TimerPropertiesObject(controller, control);
+                case "ToolStrip": return new MenuStripPropertiesObject(controller, control);
+                case "DateTimePicker": return new DatePropertiesObject(controller, control);
+                case "SplitContainer": return new SplitPropertiesObject(controller, control);
                 case "MenuStrip": return new MenuStripPropertiesObject(controller, control);
                 default: return new ControlPropertiesObject(controller, control);
             }
@@ -328,12 +373,59 @@ namespace RustForms.VisualStudio
     {
         public MenuStripPropertiesObject(FormController c, JObject o) : base(c, o) { }
 
-        [Category("Контрол"), DisplayName("Пункты (Меню/Пункт)")]
+        // Имеет смысл только для таблицы.
+        [Category("Контрол"), DisplayName("Правка ячеек (таблица)")]
+        public bool Editable { get => Flag("editable"); set => Set("editable", value); }
+
+        [Category("Контрол"), DisplayName("Строки (пункты, столбцы, узлы)")]
         public string[] Items
         {
             get => ((JArray)Data["items"]).Select(i => (string)i).ToArray();
             set => Set("items", value);
         }
+    }
+
+    internal sealed class TabControlPropertiesObject : ControlPropertiesObject
+    {
+        public TabControlPropertiesObject(FormController c, JObject o) : base(c, o) { }
+
+        [Category("Контрол"), DisplayName("Страница (с 0)")]
+        public int Page { get => (int?)Data["selected"] ?? 0; set => Set("selected", value); }
+    }
+
+    internal sealed class DatePropertiesObject : ControlPropertiesObject
+    {
+        public DatePropertiesObject(FormController c, JObject o) : base(c, o) { }
+
+        [Category("Контрол"), DisplayName("Дата (ГГГГ-ММ-ДД)")]
+        public string Date { get => Get("date"); set => Set("date", value); }
+    }
+
+    internal sealed class SplitPropertiesObject : ControlPropertiesObject
+    {
+        public SplitPropertiesObject(FormController c, JObject o) : base(c, o) { }
+
+        [Category("Контрол"), DisplayName("Разделитель")]
+        public int Distance { get => Number("distance"); set => Set("distance", value); }
+
+        [Category("Контрол"), DisplayName("Горизонтальный")]
+        public bool Horizontal { get => Flag("horizontal"); set => Set("horizontal", value); }
+    }
+
+    internal sealed class TimerPropertiesObject : ControlPropertiesObject
+    {
+        public TimerPropertiesObject(FormController c, JObject o) : base(c, o) { }
+
+        [Category("Контрол"), DisplayName("Интервал, мс")]
+        public int Interval { get => Number("interval"); set => Set("interval", value); }
+    }
+
+    internal sealed class PicturePropertiesObject : ControlPropertiesObject
+    {
+        public PicturePropertiesObject(FormController c, JObject o) : base(c, o) { }
+
+        [Category("Контрол"), DisplayName("Файл PNG (от папки формы)")]
+        public string Image { get => Get("image"); set => Set("image", value); }
     }
 
     internal sealed class ProgressBarPropertiesObject : ControlPropertiesObject

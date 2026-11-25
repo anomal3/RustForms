@@ -27,6 +27,10 @@ pub struct ControlBase {
     pub tab_index: i32,
     /// `None` — выравнивание по умолчанию (у кнопки по центру, у надписи слева).
     pub text_align: Option<TextAlign>,
+    /// Пункты меню по правой кнопке (`"Пункт"`, `"Подменю/Пункт"`, `"-"`).
+    pub context_menu: Vec<String>,
+    /// Страница вкладок, которую сейчас не показывают.
+    pub(crate) page_hidden: bool,
 }
 
 impl ControlBase {
@@ -45,6 +49,8 @@ impl ControlBase {
             tooltip: String::new(),
             tab_index: 0,
             text_align: None,
+            page_hidden: false,
+            context_menu: Vec::new(),
         }
     }
 }
@@ -84,6 +90,14 @@ impl EventCx<'_> {
 
     pub fn item_clicked(&mut self, item: impl Into<String>) {
         self.signals.push(Signal::ItemClicked(item.into()));
+    }
+
+    pub fn cell_changed(&mut self, row: usize, column: usize, text: impl Into<String>) {
+        self.signals.push(Signal::CellChanged(row, column, text.into()));
+    }
+
+    pub fn value_changed(&mut self, value: i32) {
+        self.signals.push(Signal::ValueChanged(value));
     }
 
     pub fn clipboard_get(&mut self) -> Option<String> {
@@ -163,6 +177,29 @@ pub trait ControlImpl: Control + 'static {
         if let Some(parent) = self.parent_mut() {
             parent.on_text_input(text, cx);
         }
+    }
+
+    /// Для вкладок и разделителя: получает названия страниц и отвечает, где каждую
+    /// разместить и показывать ли её. `None` — контрол страницами не управляет.
+    fn sync_pages(&mut self, titles: Vec<String>) -> Option<Vec<(Rect, bool)>> {
+        self.parent_mut().and_then(|p| p.sync_pages(titles))
+    }
+
+    /// Название, если контрол — страница вкладок.
+    fn page_title(&self) -> Option<String> {
+        self.parent().and_then(|p| p.page_title())
+    }
+
+    /// Фокус ушёл к другому контролу.
+    fn on_focus_lost(&mut self, cx: &mut EventCx) {
+        if let Some(parent) = self.parent_mut() {
+            parent.on_focus_lost(cx);
+        }
+    }
+
+    /// Пункты меню по правой кнопке, которые контрол предлагает сам (например поле ввода).
+    fn default_context(&self) -> Vec<(&'static str, Key)> {
+        self.parent().map_or_else(Vec::new, |p| p.default_context())
     }
 
     /// Мышь движется над контролом.
@@ -303,6 +340,11 @@ pub trait ControlExt: ControlImpl + Sized {
 
     fn set_tooltip(&mut self, text: impl Into<String>) {
         self.base_mut().tooltip = text.into();
+    }
+
+    /// Меню по правой кнопке; выбор даёт событие `context_item_clicked`.
+    fn set_context_menu<S: Into<String>>(&mut self, items: impl IntoIterator<Item = S>) {
+        self.base_mut().context_menu = items.into_iter().map(Into::into).collect();
     }
 
     fn set_tab_index(&mut self, index: i32) {

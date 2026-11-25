@@ -3,10 +3,19 @@ use tiny_skia::Pixmap;
 use std::time::{Duration, Instant};
 
 use crate::{
-    Align, ClosingArgs, Color, FocusArgs, FontStyle, KeyArgs, LoadArgs, MouseArgs, ResizeArgs,
-    paint::FONT_SIZE, view::EventKind, Dock, AnyControl, ControlId, EventCx, Key, Modifiers, Painter, Point, Rect, TextSystem, Ui, View,
+    Align, ClosingArgs, Color, FocusArgs, FontStyle, KeyArgs, LoadArgs, MouseArgs, ResizeArgs, TickArgs,
+    ControlImpl, MenuItemArgs, MenuStrip, paint::FONT_SIZE, view::EventKind, Dock, AnyControl, ControlId, EventCx, Key, Modifiers, Painter, Point, Rect, TextSystem, Ui, View,
     VisualState, layout, view::Signal,
 };
+
+/// Открытое меню правой кнопки.
+struct ContextMenu {
+    target: usize,
+    at: Point,
+    menu: MenuStrip,
+    /// Для собственных пунктов контрола: какую клавишу означает каждый.
+    keys: Vec<(&'static str, Key)>,
+}
 
 const TOOLTIP_DELAY: Duration = Duration::from_millis(600);
 const DOUBLE_CLICK: Duration = Duration::from_millis(500);
@@ -55,6 +64,7 @@ pub struct Application<S> {
     hover_since: Option<Instant>,
     tooltip: Option<(usize, Point)>,
     last_click: Option<(usize, Instant, Point)>,
+    context: Option<ContextMenu>,
     /// Размер окна, о котором форме уже сообщили.
     size: (f32, f32),
     /// Размер родителя каждого контрола при прошлом размещении: якоря считают от разницы.
@@ -66,6 +76,7 @@ impl<S: 'static> Application<S> {
         let size = (ui.width, ui.height);
         let mut app = Self {
             size,
+            context: None,
             hover_since: None,
             tooltip: None,
             last_click: None,
@@ -111,6 +122,22 @@ impl<S: 'static> Application<S> {
             let children: Vec<usize> =
                 (0..self.view.nodes.len()).filter(|&i| self.parent(i) == parent).collect();
             let Some(&first) = children.first() else { continue };
+            // Страницы вкладок размещает сам TabControl.
+            if let Some(parent) = parent {
+                let titles: Vec<Option<String>> =
+                    children.iter().map(|&i| self.control(i).page_title()).collect();
+                if titles.iter().all(Option::is_some)
+                    && let Some(areas) =
+                        self.control(parent).sync_pages(titles.into_iter().flatten().collect())
+                {
+                    for (&index, (area, shown)) in children.iter().zip(areas) {
+                        let base = self.control(index).base_mut();
+                        base.bounds = area;
+                        base.page_hidden = !shown;
+                    }
+                    continue;
+                }
+            }
             let size = self.parent_size(first);
             let mut docked = Vec::new();
             for &index in &children {
@@ -138,6 +165,7 @@ impl<S: 'static> Application<S> {
         self.loaded = false;
         self.size = (self.ui.width, self.ui.height);
         (self.tooltip, self.hover_since, self.last_click) = (None, None, None);
+        self.context = None;
         self.reset_layout();
     }
 
@@ -211,6 +239,7 @@ impl<S: 'static> Application<S> {
         }
         let old = std::mem::replace(&mut self.focus, focus);
         if let Some(old) = old {
+            self.with_control(old, |c, _, cx| c.on_focus_lost(cx));
             self.emit(old, EventKind::LostFocus, |sender| FocusArgs { sender });
         }
         if let Some(new) = focus {
@@ -227,13 +256,53 @@ impl<S: 'static> Application<S> {
         Some(self.hover_since? + TOOLTIP_DELAY)
     }
 
-    /// Показывает подсказку, если её время пришло; возвращает, нужна ли перерисовка.
+    /// Когда в следующий раз что-то должно произойти без участия пользователя.
+    pub fn next_wakeup(&mut self) -> Option<Instant> {
+        let timers = (0..self.view.timers.len())
+            .filter_map(|i| (self.view.timers[i].get)(&mut self.state).next)
+            .min();
+        match (self.tooltip_deadline(), timers) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    /// Вызывает `tick` у таймеров, которым пора; возвращает, сработал ли хоть один.
+    fn run_timers(&mut self, now: Instant) -> bool {
+        let mut fired = false;
+        for i in 0..self.view.timers.len() {
+            let id = self.view.timers[i].id;
+            let timer = (self.view.timers[i].get)(&mut self.state);
+            if !timer.enabled() {
+                continue;
+            }
+            match timer.next {
+                // Только что запущен: отсчёт начинается сейчас.
+                None => timer.next = Some(now + timer.interval()),
+                Some(at) if now >= at => {
+                    // Пропущенные срабатывания не накапливаются.
+                    timer.next = Some(now + timer.interval());
+                    let args = TickArgs { sender: id };
+                    self.view.emit(Some(id), EventKind::Tick, &args, &mut self.state, &mut self.ui);
+                    fired = true;
+                }
+                Some(_) => {}
+            }
+        }
+        if fired {
+            self.layout();
+        }
+        fired
+    }
+
+    /// Таймеры и подсказки; возвращает, нужна ли перерисовка.
     pub fn tick(&mut self, now: Instant) -> bool {
+        let timers = self.run_timers(now);
         let due = self.tooltip_deadline().is_some_and(|at| now >= at);
         if due {
             self.tooltip = self.hover.map(|index| (index, self.mouse));
         }
-        due
+        due || timers
     }
 
     /// Клавиша по месту на клавиатуре — для событий `key_down` и `key_up`.
@@ -278,7 +347,9 @@ impl<S: 'static> Application<S> {
 
     /// Виден ли контрол с учётом всех родителей.
     fn is_shown(&mut self, index: usize) -> bool {
-        self.control(index).base().visible
+        let base = self.control(index).base();
+        base.visible
+            && !base.page_hidden
             && self.parent(index).is_none_or(|p| self.is_shown(p))
     }
 
@@ -434,6 +505,95 @@ impl<S: 'static> Application<S> {
         Some(Rect::new(x, y, width, height))
     }
 
+    /// Щелчок правой кнопкой: меню контрола под мышью (или ближайшего родителя с меню).
+    pub fn context_click(&mut self) {
+        self.layout();
+        self.context = None;
+        self.close_popups();
+        self.tooltip = None;
+        let mut target = self.hit_test(self.mouse);
+        while let Some(index) = target {
+            if !self.is_active(index) {
+                return;
+            }
+            let control = self.control(index);
+            let mut items = control.base().context_menu.clone();
+            let mut keys = Vec::new();
+            if items.is_empty() {
+                keys = control.default_context();
+                items = keys.iter().map(|k| k.0.to_owned()).collect();
+            }
+            if !items.is_empty() {
+                if self.can_focus(index) {
+                    self.set_focus(Some(index));
+                }
+                self.text.style = FontStyle::default();
+                let menu = MenuStrip::context(&items, &mut self.text);
+                self.context = Some(ContextMenu { target: index, at: self.mouse, menu, keys });
+                return;
+            }
+            target = self.parent(index);
+        }
+    }
+
+    pub fn context_open(&self) -> bool {
+        self.context.is_some()
+    }
+
+    /// Где рисуется меню правой кнопки.
+    fn context_rect(&self) -> Option<Rect> {
+        let context = self.context.as_ref()?;
+        let (width, height) = context.menu.popup_size()?;
+        let x = context.at.x.min(self.ui.width - width).max(0.0);
+        let y = context.at.y.min(self.ui.height - height).max(0.0);
+        Some(Rect::new(x, y, width, height))
+    }
+
+    /// Передаёт мышь меню правой кнопки. `true` — событие им поглощено.
+    fn context_mouse(&mut self, down: bool) -> bool {
+        let Some(frame) = self.context_rect() else { return false };
+        let inside = frame.contains(self.mouse);
+        let local = Point::new(self.mouse.x - frame.x, self.mouse.y - frame.y);
+        let Some(context) = &mut self.context else { return false };
+        let mut signals = Vec::new();
+        self.text.style = FontStyle::default();
+        let mut cx = EventCx {
+            text: &mut self.text,
+            clipboard: &mut self.clipboard,
+            signals: &mut signals,
+            size: (frame.width, frame.height),
+        };
+        if !down {
+            if inside {
+                context.menu.on_popup_mouse_move(local, &mut cx);
+            }
+            return true;
+        }
+        if !inside {
+            self.context = None;
+            return false;
+        }
+        context.menu.on_popup_mouse_down(local, &mut cx);
+        let chosen = signals.into_iter().find_map(|s| match s {
+            Signal::ItemClicked(path) => Some(path.trim_start_matches("ctx/").to_owned()),
+            _ => None,
+        });
+        if let Some(item) = chosen
+            && let Some(context) = self.context.take()
+        {
+            match context.keys.iter().find(|k| k.0 == item) {
+                Some(&(_, key)) => {
+                    let mods = Modifiers::default();
+                    self.with_control(context.target, |c, _, cx| c.on_key(key, mods, cx));
+                }
+                None => self.emit(context.target, EventKind::ContextItemClicked, |sender| {
+                    MenuItemArgs { sender, item }
+                }),
+            }
+        }
+        true
+    }
+
     pub fn close_popups(&mut self) {
         for index in 0..self.view.nodes.len() {
             self.control(index).close_popup();
@@ -463,6 +623,10 @@ impl<S: 'static> Application<S> {
     pub fn mouse_move(&mut self, at: Point) {
         self.layout();
         self.mouse = at;
+        if self.context_mouse(false) {
+            self.set_hover(None);
+            return;
+        }
         if let Some(owner) = self.popup_under_mouse() {
             self.set_hover(None);
             self.with_control(owner, |c, local, cx| c.on_popup_mouse_move(local, cx));
@@ -485,6 +649,10 @@ impl<S: 'static> Application<S> {
     pub fn mouse_down(&mut self, mods: Modifiers) {
         self.tooltip = None;
         self.hover_since = None;
+        // Щелчок мимо меню правой кнопки закрывает его и действует дальше.
+        if self.context_mouse(true) {
+            return;
+        }
         if let Some(owner) = self.popup_owner() {
             if self.popup_under_mouse().is_some() {
                 self.with_control(owner, |c, local, cx| c.on_popup_mouse_down(local, cx));
@@ -533,6 +701,9 @@ impl<S: 'static> Application<S> {
     }
 
     pub fn key(&mut self, key: Key, mods: Modifiers) {
+        if key == Key::Escape && self.context.take().is_some() {
+            return;
+        }
         // Escape закрывает окошко, даже если у его владельца нет фокуса (меню).
         if key == Key::Escape && self.popup_owner().is_some() {
             self.close_popups();
@@ -613,6 +784,23 @@ impl<S: 'static> Application<S> {
                 let state = VisualState { enabled: true, ..VisualState::default() };
                 self.paint_control(owner, pixmap, scale, frame, clip, state, true);
             }
+        }
+        if let Some(frame) = self.context_rect()
+            && let Some(context) = &mut self.context
+        {
+            self.text.style = FontStyle::default();
+            let mut painter = Painter {
+                pixmap: &mut *pixmap,
+                text: &mut self.text,
+                scale,
+                frame,
+                clip: frame.intersect(&window),
+                state: VisualState { enabled: true, ..VisualState::default() },
+                fore: None,
+                back: None,
+                align: None,
+            };
+            context.menu.on_paint_popup(&mut painter);
         }
         self.paint_tooltip(pixmap, scale, window);
     }

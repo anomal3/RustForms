@@ -39,6 +39,21 @@ fn icon(ctx: &egui::Context, kind: Kind) -> Option<egui::TextureHandle> {
         Kind::ProgressBar => png!("ProgressBar"),
         Kind::MenuStrip => png!("MenuStrip"),
         Kind::Panel => png!("Panel"),
+        Kind::GroupBox => png!("GroupBox"),
+        Kind::LinkLabel => png!("LinkLabel"),
+        Kind::NumericUpDown => png!("NumericUpDown"),
+        Kind::TrackBar => png!("TrackBar"),
+        Kind::PictureBox => png!("PictureBox"),
+        Kind::StatusStrip => png!("StatusStrip"),
+        Kind::DataGridView => png!("DataGridView"),
+        Kind::TreeView => png!("TreeView"),
+        Kind::TabControl => png!("TabControl"),
+        Kind::TabPage => png!("TabPage"),
+        Kind::Timer => png!("Timer"),
+        Kind::DateTimePicker => png!("DateTimePicker"),
+        Kind::SplitContainer => png!("SplitContainer"),
+        Kind::SplitPanel => png!("SplitPanel"),
+        Kind::ToolStrip => png!("ToolStrip"),
     };
     let pixmap = tiny_skia::Pixmap::decode_png(bytes).ok()?;
     let size = [pixmap.width() as usize, pixmap.height() as usize];
@@ -374,7 +389,14 @@ impl Designer {
         if self.icons.is_empty() {
             self.icons = Kind::ALL.iter().filter_map(|&k| icon(ui.ctx(), k)).collect();
         }
+        // Список длинный, поэтому прокручивается отдельно от дерева.
+        let height = (ui.available_height() * 0.65).max(120.0);
+        egui::ScrollArea::vertical().id_salt("kinds").max_height(height).show(ui, |ui| {
         for (index, kind) in Kind::ALL.into_iter().enumerate() {
+            // Панели разделителя отдельно не добавляются.
+            if kind == Kind::SplitPanel {
+                continue;
+            }
             let button = match self.icons.get(index) {
                 Some(texture) => {
                     let image = egui::Image::new(texture).fit_to_exact_size(egui::vec2(16.0, 16.0));
@@ -395,6 +417,7 @@ impl Designer {
                 self.tool_dragged = true;
             }
         }
+        });
         ui.separator();
         ui.heading("Дерево");
         let Some(open) = &mut self.open else { return };

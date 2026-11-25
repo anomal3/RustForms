@@ -14,8 +14,8 @@ fn button1_click(&mut self, _ui: &mut Ui, _e: &ClickArgs) {
 
 ## Возможности
 
-- **Контролы:** `Button`, `Label`, `TextBox` (однострочный, с выделением и буфером обмена), `CheckBox`, `RadioButton`, `ComboBox`, `ListBox`, `ProgressBar`, `MenuStrip`, `Panel`; поле ввода бывает многострочным.
-- **События:** `load`, `click`, `text_changed`, `checked_changed`, `selected_changed`, `item_clicked`, события мыши, клавиатуры и фокуса, `closing` и `resize` формы; обработчики — обычные методы формы.
+- **Контролы:** `Button`, `Label`, `TextBox` (однострочный, с выделением и буфером обмена), `CheckBox`, `RadioButton`, `ComboBox`, `ListBox`, `ProgressBar`, `MenuStrip`, `Panel`, `GroupBox`, `LinkLabel`, `NumericUpDown`, `TrackBar`, `PictureBox`, `StatusStrip`, `DataGridView`, `TreeView`, `TabControl` с `TabPage`, `DateTimePicker`, `SplitContainer`, `ToolStrip`; компонент `Timer`; поле ввода бывает многострочным.
+- **События:** `load`, `click`, `text_changed`, `checked_changed`, `selected_changed`, `item_clicked`, `value_changed`, `tick`, `cell_changed`, `context_item_clicked`, события мыши, клавиатуры и фокуса, `closing` и `resize` формы; обработчики — обычные методы формы.
 - **Размещение:** якоря и Dock, как в WinForms.
 - **Свойства:** цвета, размер и жирность шрифта, выравнивание, подсказки, порядок Tab.
 - **Окна:** главное меню, системные сообщения и выбор файлов, несколько форм и диалоги.
@@ -27,7 +27,7 @@ fn button1_click(&mut self, _ui: &mut Ui, _e: &ClickArgs) {
 |---|---|
 | ![Пример hello](docs/hello.png) | ![Свои контролы](docs/custom.png) |
 | ![Якоря и Dock](docs/anchors.png) | ![Списки и другие контролы](docs/controls.png) |
-| ![Меню](docs/menu.png) | |
+| ![Меню](docs/menu.png) | ![Таблица, дерево, картинка](docs/more-controls.png) |
 
 ## Платформы
 
@@ -132,6 +132,59 @@ self.text_box1.set_multiline(true);
 
 - Радиокнопки одного родителя (формы или панели) образуют группу.
 - `set_checked` и `set_selected_index` из кода не вызывают события и не снимают отметки с соседних радиокнопок.
+
+## Таблица, дерево, картинка
+
+```rust
+self.data_grid_view1.set_columns(["Имя", "Город"]);
+self.data_grid_view1.add_row(["Анна", "Самара"]);
+let row = self.data_grid_view1.selected_row();          // Option<&[String]>
+
+self.tree_view1.set_items(["Проект/src/main.rs", "Проект/Cargo.toml"]);
+self.tree_view1.expand_all();
+
+self.picture_box1.load("photo.png")?;                    // только PNG
+self.track_bar1.set_range(0, 10);
+```
+
+Щелчок по заголовку сортирует строки, границы столбцов тянутся мышью. Картинка, указанная у `PictureBox` в дизайнере, вшивается в программу.
+
+## Дата, разделитель, панель инструментов, меню правой кнопки
+
+```rust
+self.date_time_picker1.set_value(Date::new(2026, 11, 26));   // e.text в событии: "2026-11-26"
+self.data_grid_view1.set_editable(true);
+self.list_box1.set_context_menu(["Удалить", "-", "Очистить"]);
+
+fn list_box1_context_item_clicked(&mut self, _ui: &mut Ui, e: &MenuItemArgs) {
+    if e.item == "Очистить" {
+        self.list_box1.clear();
+    }
+}
+```
+
+- Правка ячейки: повторный щелчок по выбранной, Enter или просто набор; Enter сохраняет, Escape отменяет.
+- Разделитель `SplitContainer` двигается мышью в программе; в дизайнере — свойством.
+- `ToolStrip` — кнопки-надписи, щелчок даёт `item_clicked`.
+- У поля ввода меню «Вырезать / Копировать / Вставить» есть сразу.
+- `Date::today()` считает по UTC.
+
+## Вкладки и таймер
+
+`TabControl` содержит страницы `TabPage`, контролы кладутся в страницы. В дизайнере щелчок по ярлычку переключает страницу, новую страницу добавляет элемент `TabPage` из Toolbox.
+
+```rust
+self.tab_control1.set_selected_index(1);
+
+self.timer1.set_interval_ms(500);
+self.timer1.start();
+
+fn timer1_tick(&mut self, _ui: &mut Ui, _e: &TickArgs) {
+    self.data.seconds += 1;
+}
+```
+
+`Timer` — не контрол: в программе его не видно, в дизайнере он показан значком.
 
 ## Свойства и события контролов
 

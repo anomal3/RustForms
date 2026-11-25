@@ -91,6 +91,9 @@ public final class FormCanvas extends JPanel {
         JsonArray controls = controller.controls();
         for (int i = controls.size() - 1; i >= 0; i--) {
             JsonObject control = controls.get(i).getAsJsonObject();
+            if (control.get("hidden").getAsBoolean()) {
+                continue;
+            }
             boolean inside = true;
             // Часть, выступающая за родителя, не видна и не кликается.
             for (JsonObject c = control; c != null && inside; ) {
@@ -102,6 +105,28 @@ public final class FormCanvas extends JPanel {
             }
         }
         return null;
+    }
+
+    /** Щелчок по ярлычку вкладки переключает страницу. */
+    private void switchTab(String name, Point p) {
+        JsonObject control = name == null ? null : controller.control(name);
+        if (control == null || !control.has("tabs")) {
+            return;
+        }
+        Rectangle frame = frameOf(control);
+        JsonArray edges = control.getAsJsonArray("tabs");
+        double x = p.x - frame.x;
+        if (p.y - frame.y >= 28) {
+            return;
+        }
+        for (int i = 0; i + 1 < edges.size(); i++) {
+            if (x >= edges.get(i).getAsDouble() && x < edges.get(i + 1).getAsDouble()) {
+                var request = FormController.command("page");
+                request.addProperty("name", name);
+                request.addProperty("index", i);
+                controller.send(request);
+            }
+        }
     }
 
     private static Rectangle knob(Rectangle r, int[] side) {
@@ -158,6 +183,9 @@ public final class FormCanvas extends JPanel {
         }
         for (JsonElement element : controller.controls()) {
             JsonObject control = element.getAsJsonObject();
+            if (control.get("hidden").getAsBoolean()) {
+                continue;
+            }
             Rectangle r = frameOf(control);
             if (!control.get("visible").getAsBoolean()) {
                 g.setColor(new Color(255, 255, 255, 170));
@@ -218,6 +246,7 @@ public final class FormCanvas extends JPanel {
             int[] knob = knobAt(p);
             if (knob == null) {
                 String name = hit(p);
+                switchTab(name, p);
                 controller.select(name);
                 if (name == null) {
                     return;

@@ -82,6 +82,17 @@ impl MenuStrip {
         self.open = None;
     }
 
+    /// Само по себе меню без заголовков: для правой кнопки мыши.
+    pub(crate) fn context(items: &[String], text: &mut crate::TextSystem) -> Self {
+        let mut menu = Self::new();
+        menu.set_items(items.iter().map(|item| format!("ctx/{item}")));
+        if !menu.menus.is_empty() {
+            menu.open = Some(Open { path: vec![0], x: 0.0, hot: None });
+            menu.fit(text);
+        }
+        menu
+    }
+
     fn title_at(&self, x: f32) -> Option<usize> {
         self.edges.windows(2).position(|e| x >= e[0] && x < e[1])
     }

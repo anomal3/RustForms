@@ -118,6 +118,79 @@ fn draw(name: &str, c: &mut Canvas) {
             }
             c.fill(5.5, 5.5, 5.0, 5.0, ACCENT);
         }
+        "GroupBox" => {
+            c.stroke(&[(4.0, 4.5), (2.0, 4.5), (2.0, 13.5), (14.0, 13.5), (14.0, 4.5), (11.0, 4.5)], false, LINE, 1.2);
+            c.fill(5.0, 3.5, 5.0, 2.0, ACCENT);
+        }
+        "LinkLabel" => {
+            c.stroke(&[(4.5, 10.0), (8.0, 2.5), (11.5, 10.0)], false, ACCENT, 1.6);
+            c.stroke(&[(5.8, 7.4), (10.2, 7.4)], false, ACCENT, 1.4);
+            c.fill(3.0, 12.5, 10.0, 1.4, ACCENT);
+        }
+        "NumericUpDown" => {
+            c.frame(1.5, 3.5, 13.0, 9.0);
+            c.fill(4.0, 7.4, 4.0, 1.3, LINE);
+            c.stroke(&[(10.0, 6.8), (11.5, 5.4), (13.0, 6.8)], false, ACCENT, 1.3);
+            c.stroke(&[(10.0, 9.2), (11.5, 10.6), (13.0, 9.2)], false, ACCENT, 1.3);
+        }
+        "TrackBar" => {
+            c.fill(1.5, 7.4, 13.0, 1.3, LINE);
+            c.fill(7.0, 4.0, 3.0, 8.0, ACCENT);
+        }
+        "PictureBox" => {
+            c.frame(1.5, 2.5, 13.0, 11.0);
+            c.stroke(&[(3.0, 12.0), (6.5, 7.5), (9.0, 10.5), (10.8, 8.8), (13.0, 12.0)], false, ACCENT, 1.3);
+            c.fill(10.0, 4.5, 2.2, 2.2, LINE);
+        }
+        "StatusStrip" => {
+            c.frame(1.5, 2.5, 13.0, 11.0);
+            c.fill(2.0, 10.0, 12.0, 3.0, ACCENT);
+        }
+        "DataGridView" => {
+            c.frame(1.5, 2.5, 13.0, 11.0);
+            c.fill(2.0, 3.0, 12.0, 2.8, ACCENT);
+            c.fill(2.0, 9.2, 12.0, 1.0, LINE);
+            c.fill(6.0, 6.0, 1.0, 7.0, LINE);
+        }
+        "TreeView" => {
+            c.fill(2.0, 2.5, 4.0, 3.0, ACCENT);
+            c.stroke(&[(4.0, 6.0), (4.0, 12.5), (8.0, 12.5)], false, LINE, 1.2);
+            c.stroke(&[(4.0, 8.5), (8.0, 8.5)], false, LINE, 1.2);
+            c.fill(8.5, 7.2, 5.5, 2.6, ACCENT);
+            c.fill(8.5, 11.2, 5.5, 2.6, ACCENT);
+        }
+        "TabControl" => {
+            c.frame(1.5, 5.5, 13.0, 8.0);
+            c.fill(1.5, 2.5, 5.0, 3.0, ACCENT);
+            c.fill(7.5, 3.5, 4.5, 2.0, LINE);
+        }
+        "TabPage" => {
+            c.frame(1.5, 5.5, 13.0, 8.0);
+            c.fill(1.5, 2.5, 6.0, 3.0, ACCENT);
+            c.stroke(&[(8.0, 8.0), (8.0, 11.5)], false, ACCENT, 1.4);
+            c.stroke(&[(6.2, 9.75), (9.8, 9.75)], false, ACCENT, 1.4);
+        }
+        "Timer" => {
+            c.circle(6.0, LINE, false);
+            c.stroke(&[(8.0, 4.5), (8.0, 8.0), (10.8, 9.5)], false, ACCENT, 1.6);
+        }
+        "DateTimePicker" => {
+            c.frame(2.0, 3.0, 12.0, 11.0);
+            c.fill(2.0, 3.0, 12.0, 3.0, ACCENT);
+            c.fill(4.5, 8.5, 2.0, 2.0, LINE);
+            c.fill(9.0, 8.5, 2.0, 2.0, LINE);
+            c.fill(4.5, 11.5, 2.0, 1.2, LINE);
+        }
+        "SplitContainer" | "SplitPanel" => {
+            c.frame(1.5, 2.5, 13.0, 11.0);
+            c.fill(6.8, 2.5, 2.4, 11.0, ACCENT);
+        }
+        "ToolStrip" => {
+            c.frame(1.5, 4.5, 13.0, 7.0);
+            c.fill(3.5, 6.5, 3.0, 3.0, ACCENT);
+            c.fill(7.5, 6.5, 3.0, 3.0, LINE);
+            c.fill(11.8, 6.5, 1.0, 3.0, LINE);
+        }
         _ => unreachable!("нет значка для {name}"),
     }
 }

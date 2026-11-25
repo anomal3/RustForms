@@ -16,10 +16,25 @@ pub enum Kind {
     ProgressBar,
     MenuStrip,
     Panel,
+    GroupBox,
+    LinkLabel,
+    NumericUpDown,
+    TrackBar,
+    PictureBox,
+    StatusStrip,
+    DataGridView,
+    TreeView,
+    TabControl,
+    TabPage,
+    Timer,
+    DateTimePicker,
+    SplitContainer,
+    SplitPanel,
+    ToolStrip,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 10] = [
+    pub const ALL: [Kind; 25] = [
         Kind::Button,
         Kind::Label,
         Kind::TextBox,
@@ -30,11 +45,60 @@ impl Kind {
         Kind::ProgressBar,
         Kind::MenuStrip,
         Kind::Panel,
+        Kind::GroupBox,
+        Kind::LinkLabel,
+        Kind::NumericUpDown,
+        Kind::TrackBar,
+        Kind::PictureBox,
+        Kind::StatusStrip,
+        Kind::DataGridView,
+        Kind::TreeView,
+        Kind::TabControl,
+        Kind::TabPage,
+        Kind::Timer,
+        Kind::DateTimePicker,
+        Kind::SplitContainer,
+        Kind::SplitPanel,
+        Kind::ToolStrip,
     ];
+
+    /// Высота ярлычков вкладок: страницы занимают всё под ними.
+    pub const TAB_HEADER: f32 = 28.0;
+
+    /// Внутрь этих можно класть другие контролы (в `TabControl` — только страницы).
+    pub fn container(self) -> bool {
+        matches!(self, Kind::Panel | Kind::GroupBox | Kind::TabPage | Kind::SplitPanel)
+    }
+
+    /// Можно ли положить контрол этого вида в `parent` (`None` — прямо на форму).
+    pub fn fits_in(self, parent: Option<Kind>) -> bool {
+        match self {
+            Kind::TabPage => parent == Some(Kind::TabControl),
+            Kind::SplitPanel => parent == Some(Kind::SplitContainer),
+            // Таймер не контрол и ни в чём не лежит.
+            Kind::Timer => parent.is_none(),
+            _ => parent.is_none_or(Kind::container),
+        }
+    }
+
+    /// У этих есть значение в диапазоне.
+    pub fn ranged(self) -> bool {
+        matches!(self, Kind::ProgressBar | Kind::NumericUpDown | Kind::TrackBar)
+    }
 
     /// У этих контролов есть подпись, задаваемая конструктором.
     pub fn captioned(self) -> bool {
-        matches!(self, Kind::Button | Kind::Label | Kind::CheckBox | Kind::RadioButton)
+        matches!(
+            self,
+            Kind::Button
+                | Kind::Label
+                | Kind::CheckBox
+                | Kind::RadioButton
+                | Kind::GroupBox
+                | Kind::LinkLabel
+                | Kind::StatusStrip
+                | Kind::TabPage
+        )
     }
 
     pub fn has_text(self) -> bool {
@@ -42,7 +106,15 @@ impl Kind {
     }
 
     pub fn has_items(self) -> bool {
-        matches!(self, Kind::ComboBox | Kind::ListBox | Kind::MenuStrip)
+        matches!(
+            self,
+            Kind::ComboBox
+                | Kind::ListBox
+                | Kind::MenuStrip
+                | Kind::DataGridView
+                | Kind::TreeView
+                | Kind::ToolStrip
+        )
     }
 
     /// Списки, в которых есть выбранная строка.
@@ -66,6 +138,21 @@ impl Kind {
             Kind::ProgressBar => "ProgressBar",
             Kind::MenuStrip => "MenuStrip",
             Kind::Panel => "Panel",
+            Kind::GroupBox => "GroupBox",
+            Kind::LinkLabel => "LinkLabel",
+            Kind::NumericUpDown => "NumericUpDown",
+            Kind::TrackBar => "TrackBar",
+            Kind::PictureBox => "PictureBox",
+            Kind::StatusStrip => "StatusStrip",
+            Kind::DataGridView => "DataGridView",
+            Kind::TreeView => "TreeView",
+            Kind::TabControl => "TabControl",
+            Kind::TabPage => "TabPage",
+            Kind::Timer => "Timer",
+            Kind::DateTimePicker => "DateTimePicker",
+            Kind::SplitContainer => "SplitContainer",
+            Kind::SplitPanel => "SplitPanel",
+            Kind::ToolStrip => "ToolStrip",
         }
     }
 
@@ -79,23 +166,68 @@ impl Kind {
             Kind::ListBox => (160.0, 112.0),
             Kind::ProgressBar => (200.0, 18.0),
             Kind::MenuStrip => (300.0, 26.0),
+            Kind::GroupBox => (200.0, 100.0),
+            Kind::LinkLabel => (120.0, 22.0),
+            Kind::NumericUpDown => (100.0, 28.0),
+            Kind::TrackBar => (200.0, 28.0),
+            Kind::PictureBox => (120.0, 90.0),
+            Kind::StatusStrip => (300.0, 24.0),
+            Kind::DataGridView => (320.0, 150.0),
+            Kind::TreeView => (180.0, 150.0),
+            Kind::TabControl => (300.0, 180.0),
+            Kind::TabPage => (300.0, 152.0),
+            Kind::Timer => (28.0, 28.0),
+            Kind::DateTimePicker => (150.0, 28.0),
+            Kind::SplitContainer => (300.0, 160.0),
+            Kind::SplitPanel => (100.0, 160.0),
+            Kind::ToolStrip => (300.0, 30.0),
             Kind::Panel => (200.0, 100.0),
         }
     }
 
     pub fn focusable(self) -> bool {
-        !matches!(self, Kind::Label | Kind::ProgressBar | Kind::MenuStrip | Kind::Panel)
+        !matches!(
+            self,
+            Kind::Label
+                | Kind::ProgressBar
+                | Kind::MenuStrip
+                | Kind::Panel
+                | Kind::GroupBox
+                | Kind::PictureBox
+                | Kind::StatusStrip
+                | Kind::TabPage
+                | Kind::Timer
+                | Kind::SplitContainer
+                | Kind::SplitPanel
+                | Kind::ToolStrip
+        )
     }
 
     /// События контрола; первое создаётся двойным кликом в дизайнере.
     pub fn events(self) -> Vec<Event> {
+        if self == Kind::Timer {
+            return vec![Event::Tick];
+        }
         let mut events = match self {
-            Kind::Button | Kind::Label => vec![Event::Click],
+            Kind::Button | Kind::Label | Kind::LinkLabel | Kind::PictureBox => vec![Event::Click],
             Kind::TextBox => vec![Event::TextChanged],
             Kind::CheckBox | Kind::RadioButton => vec![Event::CheckedChanged, Event::Click],
-            Kind::ComboBox | Kind::ListBox => vec![Event::SelectedChanged],
+            Kind::ComboBox | Kind::ListBox | Kind::TreeView | Kind::DateTimePicker => {
+                vec![Event::SelectedChanged]
+            }
+            Kind::DataGridView => vec![Event::SelectedChanged, Event::CellChanged],
+            Kind::ToolStrip => vec![Event::ItemClicked],
+            Kind::NumericUpDown | Kind::TrackBar => vec![Event::ValueChanged],
             Kind::MenuStrip => vec![Event::ItemClicked],
-            Kind::ProgressBar | Kind::Panel => Vec::new(),
+            Kind::TabControl => vec![Event::SelectedChanged],
+            Kind::ProgressBar
+            | Kind::Panel
+            | Kind::GroupBox
+            | Kind::StatusStrip
+            | Kind::TabPage
+            | Kind::Timer
+            | Kind::SplitContainer
+            | Kind::SplitPanel => Vec::new(),
         };
         events.extend([
             Event::DoubleClick,
@@ -103,6 +235,7 @@ impl Kind {
             Event::MouseLeave,
             Event::MouseDown,
             Event::MouseUp,
+            Event::ContextItemClicked,
         ]);
         if self.focusable() {
             events.extend([Event::KeyDown, Event::KeyUp, Event::GotFocus, Event::LostFocus]);
@@ -131,10 +264,14 @@ pub enum Event {
     LostFocus,
     Closing,
     Resize,
+    ValueChanged,
+    Tick,
+    CellChanged,
+    ContextItemClicked,
 }
 
 impl Event {
-    pub const ALL: [Event; 17] = [
+    pub const ALL: [Event; 21] = [
         Event::Load,
         Event::Click,
         Event::TextChanged,
@@ -152,6 +289,10 @@ impl Event {
         Event::LostFocus,
         Event::Closing,
         Event::Resize,
+        Event::ValueChanged,
+        Event::Tick,
+        Event::CellChanged,
+        Event::ContextItemClicked,
     ];
 
     /// События самой формы, а не контрола.
@@ -176,6 +317,10 @@ impl Event {
             Event::LostFocus => "lost_focus",
             Event::Closing => "closing",
             Event::Resize => "resize",
+            Event::ValueChanged => "value_changed",
+            Event::Tick => "tick",
+            Event::CellChanged => "cell_changed",
+            Event::ContextItemClicked => "context_item_clicked",
         }
     }
 
@@ -196,6 +341,10 @@ impl Event {
             Event::GotFocus | Event::LostFocus => "FocusArgs",
             Event::Closing => "ClosingArgs",
             Event::Resize => "ResizeArgs",
+            Event::ValueChanged => "ValueChangedArgs",
+            Event::Tick => "TickArgs",
+            Event::CellChanged => "CellChangedArgs",
+            Event::ContextItemClicked => "MenuItemArgs",
         }
     }
 }
@@ -337,6 +486,27 @@ pub struct Control {
     /// Строки `ComboBox` и `ListBox`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub items: Vec<String>,
+    /// Меню по правой кнопке: `Пункт`, `Подменю/Пункт`, `-`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context: Vec<String>,
+    /// Только `DateTimePicker`: `ГГГГ-ММ-ДД`; без неё — сегодняшняя.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
+    /// Только `DataGridView`: разрешить правку ячеек.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub editable: bool,
+    /// Только `SplitContainer`: панели друг над другом.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub horizontal: bool,
+    /// Только `SplitContainer`: размер первой панели.
+    #[serde(default = "hundred_u", skip_serializing_if = "is_hundred_u")]
+    pub distance: u32,
+    /// Только `Timer`: интервал в миллисекундах.
+    #[serde(default = "second", skip_serializing_if = "is_second")]
+    pub interval: u32,
+    /// Файл PNG для `PictureBox`, путь относительно папки формы.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
     /// Выбранная строка (с нуля).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected: Option<usize>,
@@ -387,6 +557,45 @@ fn is_hundred(value: &i32) -> bool {
     *value == 100
 }
 
+fn hundred_u() -> u32 {
+    100
+}
+
+fn is_hundred_u(value: &u32) -> bool {
+    *value == 100
+}
+
+/// Три числа даты `ГГГГ-ММ-ДД`.
+pub(crate) fn parse_date(text: &str) -> Result<(i32, u32, u32), Error> {
+    let bad = || Error(format!("дата `{text}` должна быть в виде ГГГГ-ММ-ДД"));
+    let mut parts = text.split('-').map(|p| p.parse::<u32>().ok());
+    let (Some(Some(y)), Some(Some(m)), Some(Some(d)), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return Err(bad());
+    };
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let days = match m {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        1..=12 => 31,
+        _ => 0,
+    };
+    if !(1..=9999).contains(&y) || d == 0 || d > days {
+        return Err(bad());
+    }
+    Ok((y as i32, m, d))
+}
+
+fn second() -> u32 {
+    1000
+}
+
+fn is_second(value: &u32) -> bool {
+    *value == 1000
+}
+
 fn yes() -> bool {
     true
 }
@@ -412,16 +621,32 @@ impl Control {
             text,
             anchor: default_anchor(),
             // Меню по умолчанию прижато к верхнему краю.
-            dock: if kind == Kind::MenuStrip { Dock::Top } else { Dock::None },
+            dock: match kind {
+                Kind::MenuStrip | Kind::ToolStrip => Dock::Top,
+                Kind::StatusStrip => Dock::Bottom,
+                _ => Dock::None,
+            },
             visible: true,
-            enabled: true,
+            // Таймер, как в WinForms, сначала остановлен.
+            enabled: kind != Kind::Timer,
             checked: false,
             multiline: false,
-            items: if kind == Kind::MenuStrip {
-                vec!["Файл/Открыть".into(), "Файл/-".into(), "Файл/Выход".into()]
-            } else {
-                Vec::new()
+            items: match kind {
+                Kind::MenuStrip => vec!["Файл/Открыть".into(), "Файл/-".into(), "Файл/Выход".into()],
+                Kind::DataGridView => vec!["Столбец 1".into(), "Столбец 2".into()],
+                Kind::TreeView => vec!["Узел/Дочерний".into()],
+                Kind::ToolStrip => {
+                    vec!["Новый".into(), "Открыть".into(), "-".into(), "Сохранить".into()]
+                }
+                _ => Vec::new(),
             },
+            image: None,
+            interval: 1000,
+            context: Vec::new(),
+            date: None,
+            editable: false,
+            horizontal: false,
+            distance: 100,
             selected: None,
             value: 0,
             minimum: 0,
@@ -491,6 +716,21 @@ impl FormModel {
             Kind::ListBox => "list_box",
             Kind::ProgressBar => "progress_bar",
             Kind::MenuStrip => "menu_strip",
+            Kind::GroupBox => "group_box",
+            Kind::LinkLabel => "link_label",
+            Kind::NumericUpDown => "numeric_up_down",
+            Kind::TrackBar => "track_bar",
+            Kind::PictureBox => "picture_box",
+            Kind::StatusStrip => "status_strip",
+            Kind::DataGridView => "data_grid_view",
+            Kind::TreeView => "tree_view",
+            Kind::TabControl => "tab_control",
+            Kind::TabPage => "tab_page",
+            Kind::Timer => "timer",
+            Kind::DateTimePicker => "date_time_picker",
+            Kind::SplitContainer => "split_container",
+            Kind::SplitPanel => "split_panel",
+            Kind::ToolStrip => "tool_strip",
             Kind::Panel => "panel",
         };
         (1..)
@@ -525,13 +765,27 @@ impl FormModel {
             if !names.insert(c.name.as_str()) {
                 return fail(format!("имя `{}` занято дважды", c.name));
             }
-            if let Some(parent) = &c.parent
-                && seen.get(parent.as_str()) != Some(&Kind::Panel)
-            {
-                return fail(format!(
-                    "`{}`: родитель `{parent}` должен быть панелью, объявленной выше",
-                    c.name
-                ));
+            let parent = match &c.parent {
+                Some(parent) => match seen.get(parent.as_str()) {
+                    Some(&kind) => Some(kind),
+                    None => {
+                        return fail(format!("`{}`: `{parent}` должен быть объявлен выше", c.name));
+                    }
+                },
+                None => None,
+            };
+            if !c.kind.fits_in(parent) {
+                return fail(match c.kind {
+                    Kind::TabPage => format!("`{}`: страница должна лежать в TabControl", c.name),
+                    Kind::SplitPanel => {
+                        format!("`{}`: панель должна лежать в SplitContainer", c.name)
+                    }
+                    Kind::Timer => format!("`{}`: таймер не кладётся внутрь контролов", c.name),
+                    _ => format!("`{}`: сюда этот контрол положить нельзя", c.name),
+                });
+            }
+            if let Some(date) = &c.date {
+                parse_date(date)?;
             }
             if let Some(custom) = &c.custom
                 && syn::parse_str::<syn::Path>(custom).is_err()
@@ -541,7 +795,7 @@ impl FormModel {
             if !(c.x.is_finite() && c.y.is_finite() && c.width >= 0.0 && c.height >= 0.0) {
                 return fail(format!("`{}`: неверные координаты или размер", c.name));
             }
-            if c.selected.is_some_and(|i| i >= c.items.len()) {
+            if c.kind != Kind::TabControl && c.selected.is_some_and(|i| i >= c.items.len()) {
                 return fail(format!("`{}`: выбранной строки нет в списке", c.name));
             }
             if c.font_size.is_some_and(|size| !(4.0..=200.0).contains(&size)) {

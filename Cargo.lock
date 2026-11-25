@@ -758,14 +758,14 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
 name = "custom"
-version = "0.1.0"
+version = "0.12.0"
 dependencies = [
  "rustforms",
 ]
 
 [[package]]
 name = "dialogs"
-version = "0.1.0"
+version = "0.12.0"
 dependencies = [
  "rustforms",
 ]
@@ -1595,7 +1595,7 @@ dependencies = [
 
 [[package]]
 name = "hello"
-version = "0.1.0"
+version = "0.12.0"
 dependencies = [
  "rustforms",
 ]
@@ -2963,7 +2963,7 @@ dependencies = [
 
 [[package]]
 name = "rustforms"
-version = "0.1.0"
+version = "0.12.0"
 dependencies = [
  "arboard",
  "cosmic-text",
@@ -2977,7 +2977,7 @@ dependencies = [
 
 [[package]]
 name = "rustforms-designer"
-version = "0.1.0"
+version = "0.12.0"
 dependencies = [
  "base64",
  "eframe",
@@ -2991,7 +2991,7 @@ dependencies = [
 
 [[package]]
 name = "rustforms-macros"
-version = "0.1.0"
+version = "0.12.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3000,7 +3000,7 @@ dependencies = [
 
 [[package]]
 name = "rustforms-model"
-version = "0.1.0"
+version = "0.12.0"
 dependencies = [
  "proc-macro2",
  "serde",

@@ -73,6 +73,10 @@ namespace RustForms.VisualStudio.Designer
 
         private string Hit(Point p) => controller.Controls.Cast<JObject>().Reverse().Where(control =>
         {
+            if ((bool)control["hidden"])
+            {
+                return false;
+            }
             // Часть, выступающая за родителя, не видна и не кликается.
             for (var c = control; c != null; c = controller.Control((string)c["parent"]))
             {
@@ -94,6 +98,29 @@ namespace RustForms.VisualStudio.Designer
             {
                 var control = controller.Selected == null ? null : controller.Control(controller.Selected);
                 return control == null ? (Rect?)null : FrameOf(control);
+            }
+        }
+
+        /// <summary>Щелчок по ярлычку вкладки переключает страницу.</summary>
+        private void SwitchTab(string name, Point p)
+        {
+            var control = name == null ? null : controller.Control(name);
+            if (!(control?["tabs"] is JArray edges))
+            {
+                return;
+            }
+            var frame = FrameOf(control);
+            var x = p.X - frame.X;
+            if (p.Y - frame.Y >= 28)
+            {
+                return;
+            }
+            for (var i = 0; i + 1 < edges.Count; i++)
+            {
+                if (x >= (double)edges[i] && x < (double)edges[i + 1])
+                {
+                    controller.Send("page", new JObject { ["name"] = name, ["index"] = i });
+                }
             }
         }
 
@@ -144,6 +171,10 @@ namespace RustForms.VisualStudio.Designer
             }
             foreach (JObject control in controller.Controls)
             {
+                if ((bool)control["hidden"])
+                {
+                    continue;
+                }
                 var r = FrameOf(control);
                 if (!(bool)control["visible"])
                 {
@@ -239,6 +270,7 @@ namespace RustForms.VisualStudio.Designer
             if (knob == null)
             {
                 var name = Hit(p);
+                SwitchTab(name, p);
                 controller.Select(name);
                 if (name == null)
                 {

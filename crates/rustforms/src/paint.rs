@@ -226,6 +226,36 @@ impl Painter<'_> {
             .fill_path(&path, &solid(color), FillRule::Winding, transform, mask.as_ref());
     }
 
+    /// Картинка, растянутая в `rect`; за пределы контрола не выходит.
+    pub fn image(&mut self, image: &Pixmap, rect: Rect) {
+        let target = self.to_window(rect);
+        if target.intersect(&self.clip).is_empty() || image.width() == 0 || image.height() == 0 {
+            return;
+        }
+        let mask = if target.intersect(&self.clip) == target {
+            None
+        } else {
+            self.clip_mask()
+        };
+        let sx = target.width * self.scale / image.width() as f32;
+        let sy = target.height * self.scale / image.height() as f32;
+        let transform = Transform::from_scale(sx, sy)
+            .post_translate(target.x * self.scale, target.y * self.scale);
+        let paint = tiny_skia::PixmapPaint {
+            quality: tiny_skia::FilterQuality::Bilinear,
+            ..tiny_skia::PixmapPaint::default()
+        };
+        self.pixmap.draw_pixmap(0, 0, image.as_ref(), &paint, transform, mask.as_ref());
+    }
+
+    /// Маска по видимой части. Дорогая, поэтому строится только когда нужна.
+    fn clip_mask(&self) -> Option<Mask> {
+        let clip = PathBuilder::from_rect(self.physical(self.clip)?);
+        let mut mask = Mask::new(self.pixmap.width(), self.pixmap.height())?;
+        mask.fill_path(&clip, FillRule::Winding, false, Transform::identity());
+        Some(mask)
+    }
+
     /// Одна строка текста внутри `rect`, по вертикали по центру; не выходит за его границы.
     /// `scroll` сдвигает текст влево.
     pub fn text(&mut self, text: &str, rect: Rect, color: Color, align: Align, scroll: f32) {

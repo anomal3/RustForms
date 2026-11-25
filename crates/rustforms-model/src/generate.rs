@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use crate::{
-    Align, Control, Dock, Error, Event, FormModel, Kind, default_anchor, model::parse_color,
+    Align, Control, Dock, Error, Event, FormModel, Kind, default_anchor, model::{parse_color, parse_date},
 };
 
 /// Содержимое `*.designer.rs`. Модуль подключается из файла формы как дочерний.
@@ -60,6 +60,17 @@ pub fn designer_code(model: &FormModel) -> Result<String, Error> {
             }
             (None, kind) => format!("{}::new()", kind.name()),
         };
+        // Таймер на форме не виден, поэтому у него нет ни места, ни размера.
+        if c.kind == Kind::Timer {
+            let (name, interval) = (&c.name, c.interval);
+            if c.enabled {
+                line!("        let mut {name} = Timer::new({interval});");
+                line!("        {name}.start();");
+            } else {
+                line!("        let {name} = Timer::new({interval});");
+            }
+            continue;
+        }
         let place = format!(".at({:?}, {:?}).size({:?}, {:?})", c.x, c.y, c.width, c.height);
         let setup = setup_lines(c)?;
         if setup.is_empty() {
@@ -88,6 +99,10 @@ pub fn designer_code(model: &FormModel) -> Result<String, Error> {
         let used = !c.events.is_empty()
             || model.controls.iter().any(|child| child.parent.as_deref() == Some(&c.name));
         let binding = if used { format!("let {}_id = ", c.name) } else { String::new() };
+        if c.kind == Kind::Timer {
+            line!("        {binding}view.add_timer({field});");
+            continue;
+        }
         match &c.parent {
             Some(parent) => {
                 line!("        {binding}view.add_to({parent}_id, {field});");
@@ -136,18 +151,50 @@ fn setup_lines(c: &Control) -> Result<Vec<String>, Error> {
     {
         lines.push(format!("set_text({text:?})"));
     }
+    if c.kind == Kind::DateTimePicker
+        && let Some(date) = &c.date
+    {
+        let (year, month, day) = parse_date(date)?;
+        lines.push(format!("set_value(Date::new({year}, {month}, {day}))"));
+    }
+    if c.kind == Kind::SplitContainer {
+        if c.distance != 100 {
+            lines.push(format!("set_distance({:?})", c.distance as f32));
+        }
+        if c.horizontal {
+            lines.push("set_horizontal(true)".into());
+        }
+    }
+    if c.kind == Kind::DataGridView && c.editable {
+        lines.push("set_editable(true)".into());
+    }
+    if !c.context.is_empty() {
+        lines.push(format!("set_context_menu({:?})", c.context));
+    }
+    if c.kind == Kind::TabControl
+        && let Some(selected) = c.selected
+    {
+        lines.push(format!("set_selected_index({selected})"));
+    }
     if c.kind.checkable() && c.checked {
         lines.push("set_checked(true)".into());
     }
     if c.kind.has_items() {
         if !c.items.is_empty() {
-            lines.push(format!("set_items({:?})", c.items));
+            let method = if c.kind == Kind::DataGridView { "set_columns" } else { "set_items" };
+            lines.push(format!("{method}({:?})", c.items));
         }
         if let Some(selected) = c.selected.filter(|_| c.kind.selectable()) {
             lines.push(format!("set_selected_index(Some({selected}))"));
         }
     }
-    if c.kind == Kind::ProgressBar {
+    if c.kind == Kind::PictureBox
+        && let Some(image) = c.image.as_deref().filter(|i| !i.is_empty())
+    {
+        // Картинка вшивается в программу; путь — от папки формы.
+        lines.push(format!("set_image_png(include_bytes!({:?}))", image.replace('\\', "/")));
+    }
+    if c.kind.ranged() {
         if (c.minimum, c.maximum) != (0, 100) {
             lines.push(format!("set_range({}, {})", c.minimum, c.maximum));
         }

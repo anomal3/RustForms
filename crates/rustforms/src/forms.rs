@@ -18,6 +18,7 @@ pub(crate) trait AnyForm {
     fn mouse_leave(&mut self);
     fn mouse_down(&mut self, mods: Modifiers);
     fn mouse_up(&mut self);
+    fn context_click(&mut self);
     fn wheel(&mut self, lines: f32);
     fn key(&mut self, key: Key, mods: Modifiers);
     fn text_input(&mut self, text: &str);
@@ -27,7 +28,7 @@ pub(crate) trait AnyForm {
     fn try_close(&mut self) -> bool;
     fn resized(&mut self);
     fn raw_key(&mut self, key: &str, mods: Modifiers, pressed: bool);
-    fn tooltip_deadline(&mut self) -> Option<Instant>;
+    fn next_wakeup(&mut self) -> Option<Instant>;
     fn tick(&mut self, now: Instant) -> bool;
 }
 
@@ -62,6 +63,10 @@ impl<S: 'static> AnyForm for Application<S> {
 
     fn mouse_up(&mut self) {
         Application::mouse_up(self);
+    }
+
+    fn context_click(&mut self) {
+        Application::context_click(self);
     }
 
     fn wheel(&mut self, lines: f32) {
@@ -101,8 +106,8 @@ impl<S: 'static> AnyForm for Application<S> {
         Application::raw_key(self, key, mods, pressed);
     }
 
-    fn tooltip_deadline(&mut self) -> Option<Instant> {
-        Application::tooltip_deadline(self)
+    fn next_wakeup(&mut self) -> Option<Instant> {
+        Application::next_wakeup(self)
     }
 
     fn tick(&mut self, now: Instant) -> bool {
