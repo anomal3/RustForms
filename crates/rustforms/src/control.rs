@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use crate::{
-    Key, Modifiers, Painter, Point, Rect, TextSystem, app::Clipboard, events::Signal,
+    Anchor, Dock, Key, Modifiers, Painter, Point, Rect, TextSystem, app::Clipboard, view::Signal,
 };
 
 /// Свойства, общие для всех контролов.
@@ -12,6 +12,9 @@ pub struct ControlBase {
     pub visible: bool,
     pub enabled: bool,
     pub tab_stop: bool,
+    pub anchor: Anchor,
+    /// Отличное от `None` отменяет якорь.
+    pub dock: Dock,
 }
 
 impl ControlBase {
@@ -21,6 +24,8 @@ impl ControlBase {
             visible: true,
             enabled: true,
             tab_stop,
+            anchor: Anchor::default(),
+            dock: Dock::None,
         }
     }
 }
@@ -164,6 +169,24 @@ pub trait ControlExt: ControlImpl + Sized {
         bounds.width = width;
         bounds.height = height;
         self
+    }
+
+    fn anchor(mut self, anchor: Anchor) -> Self {
+        self.base_mut().anchor = anchor;
+        self
+    }
+
+    fn dock(mut self, dock: Dock) -> Self {
+        self.base_mut().dock = dock;
+        self
+    }
+
+    fn set_anchor(&mut self, anchor: Anchor) {
+        self.base_mut().anchor = anchor;
+    }
+
+    fn set_dock(&mut self, dock: Dock) {
+        self.base_mut().dock = dock;
     }
 
     fn bounds(&self) -> Rect {

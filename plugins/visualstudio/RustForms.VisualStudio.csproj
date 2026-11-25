@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>RustForms.VisualStudio</AssemblyName>
+    <RootNamespace>RustForms.VisualStudio</RootNamespace>
+    <VSSDKBuildToolsAutoSetup>true</VSSDKBuildToolsAutoSetup>
+    <GeneratePkgDefFile>true</GeneratePkgDefFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <CreateVsixContainer>true</CreateVsixContainer>
+    <IncludeAssemblyInVSIXContainer>true</IncludeAssemblyInVSIXContainer>
+    <DeployExtension>false</DeployExtension>
+    <!-- Session общий с проверкой вне VS, поэтому пользуется обычным Dispatcher. -->
+    <NoWarn>$(NoWarn);VSTHRD001;VSTHRD110;VSSDK006</NoWarn>
+    <!-- Путь к дизайнеру на этой машине; задаёт build.ps1. -->
+    <DesignerPath Condition="'$(DesignerPath)' == ''">rustforms-designer.exe</DesignerPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Design" />
+    <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.0.31902.203" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="18.5.40034" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <VSCTCompile Include="RustForms.vsct">
+      <ResourceName>Menus.ctmenu</ResourceName>
+    </VSCTCompile>
+    <None Include="source.extension.vsixmanifest" />
+    <!-- Сюда же вшивается таблица меню из .vsct. -->
+    <EmbeddedResource Update="VSPackage.resx">
+      <MergeWithCTO>true</MergeWithCTO>
+      <ManifestResourceName>VSPackage</ManifestResourceName>
+    </EmbeddedResource>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>DesignerPath</_Parameter1>
+      <_Parameter2>$(DesignerPath)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+</Project>

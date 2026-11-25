@@ -10,46 +10,46 @@ use rustforms::prelude::*;
 
 struct MainForm {
     base: DialogForm,
-    plus: Handle<RoundButton>,
+    plus: RoundButton,
+    reset: RoundButton,
     count: u32,
 }
 
 impl MainForm {
-    fn plus_click(&mut self, ui: &mut Ui, _e: &ClickArgs) {
+    fn plus_click(&mut self, _ui: &mut Ui, _e: &ClickArgs) {
         self.count += 1;
-        ui[self.base.status].set_text(format!("Счёт: {}", self.count));
-        ui[self.plus].set_text(format!("Ещё ({})", self.count));
+        self.base.status.set_text(format!("Счёт: {}", self.count));
+        self.plus.set_text(format!("Ещё ({})", self.count));
     }
 
-    fn reset_click(&mut self, ui: &mut Ui, _e: &ClickArgs) {
+    fn reset_click(&mut self, _ui: &mut Ui, _e: &ClickArgs) {
         self.count = 0;
-        ui[self.base.status].set_text("Сброшено");
-        ui[self.plus].set_text("Прибавить");
+        self.base.status.set_text("Сброшено");
+        self.plus.set_text("Прибавить");
     }
 }
 
 fn build() -> Application<MainForm> {
-    let mut ui = Ui::new("RustForms — свои контролы", 380.0, 180.0);
-    let mut events = Events::new();
-    let base = events.include(
-        |form: &mut MainForm| &mut form.base,
-        |events| DialogForm::build(&mut ui, events, "Эта форма построена на DialogForm"),
-    );
-
-    let plus = ui.add(
-        RoundButton::new("Прибавить", Color::rgb(0, 120, 90))
+    let ui = Ui::new("RustForms — свои контролы", 380.0, 180.0);
+    let form = MainForm {
+        base: DialogForm::new(&ui, "Эта форма построена на DialogForm"),
+        plus: RoundButton::new("Прибавить", Color::rgb(0, 120, 90))
             .at(20.0, 56.0)
             .size(160.0, 40.0),
-    );
-    let reset = ui.add(
-        RoundButton::new("Сбросить", Color::rgb(170, 60, 50))
+        reset: RoundButton::new("Сбросить", Color::rgb(170, 60, 50))
             .at(200.0, 56.0)
             .size(160.0, 40.0),
-    );
-    events.on_click(plus, MainForm::plus_click);
-    events.on_click(reset, MainForm::reset_click);
+        count: 0,
+    };
 
-    Application::new(ui, MainForm { base, plus, count: 0 }, events)
+    let mut view = View::new();
+    view.include(|form: &mut MainForm| &mut form.base, DialogForm::view);
+    let plus = view.add(|f: &mut MainForm| &mut f.plus);
+    let reset = view.add(|f: &mut MainForm| &mut f.reset);
+    view.on_click(plus, MainForm::plus_click);
+    view.on_click(reset, MainForm::reset_click);
+
+    Application::new(ui, form, view)
 }
 
 fn main() -> Result<(), rustforms::RunError> {

@@ -2,6 +2,7 @@ package dev.rustforms.rustrover.ui;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.event.MouseAdapter;
@@ -22,7 +23,7 @@ import javax.swing.table.TableCellRenderer;
 
 /** Окно свойств и событий, как Properties в Visual Studio. */
 public final class PropertiesPanel extends JPanel {
-    private enum Type { TEXT, NUMBER, FLAG, EVENT }
+    private enum Type { TEXT, NUMBER, FLAG, EVENT, DOCK }
 
     private record Row(String label, String owner, String property, Type type, Object value) {
     }
@@ -43,8 +44,12 @@ public final class PropertiesPanel extends JPanel {
 
         @Override
         public TableCellEditor getCellEditor(int row, int column) {
-            return rows.get(row).type() == Type.FLAG
-                    ? new DefaultCellEditor(flagBox()) : new DefaultCellEditor(new JTextField());
+            return switch (rows.get(row).type()) {
+                case FLAG -> new DefaultCellEditor(flagBox());
+                case DOCK -> new DefaultCellEditor(new JComboBox<>(
+                        new String[] {"none", "top", "bottom", "left", "right", "fill"}));
+                default -> new DefaultCellEditor(new JTextField());
+            };
         }
 
         @Override
@@ -127,6 +132,11 @@ public final class PropertiesPanel extends JPanel {
             }
             for (String[] p : new String[][] {{"X", "x"}, {"Y", "y"}, {"Ширина", "width"}, {"Высота", "height"}}) {
                 next.add(new Row(p[0], selected, p[1], Type.NUMBER, control.get(p[1]).getAsInt()));
+            }
+            next.add(new Row("Dock", selected, "dock", Type.DOCK, text(control, "dock")));
+            for (String[] s : new String[][] {{"слева", "left"}, {"сверху", "top"}, {"справа", "right"}, {"снизу", "bottom"}}) {
+                boolean on = control.getAsJsonArray("anchor").contains(new JsonPrimitive(s[1]));
+                next.add(new Row("Якорь " + s[0], selected, "anchor:" + s[1], Type.FLAG, on));
             }
             next.add(new Row("Видимый", selected, "visible", Type.FLAG, control.get("visible").getAsBoolean()));
             next.add(new Row("Доступен", selected, "enabled", Type.FLAG, control.get("enabled").getAsBoolean()));

@@ -10,7 +10,7 @@ use std::{
 };
 
 use base64::Engine;
-use rustforms_model::{Event, FormModel, Kind, attach_handler, load, save};
+use rustforms_model::{Dock, Event, FormModel, Kind, Side, attach_handler, load, save};
 use serde_json::{Map, Value, json};
 
 use crate::{document::Document, render::Renderer};
@@ -49,7 +49,7 @@ impl Server {
         if now != self.disk {
             let model = load(&self.path).map_err(|e| e.to_string())?;
             self.document.checkpoint(None);
-            self.document.model = model;
+            self.document.reset(model);
             self.disk = now;
         }
         Ok(())
@@ -169,7 +169,7 @@ impl Server {
                 let at = attach_handler(&self.path, name.as_deref(), event)
                     .map_err(|e| e.to_string())?;
                 self.document.checkpoint(None);
-                self.document.model = load(&self.path).map_err(|e| e.to_string())?;
+                self.document.reset(load(&self.path).map_err(|e| e.to_string())?);
                 self.disk = fs::read_to_string(&self.path).map_err(|e| e.to_string())?;
                 reply.insert(
                     "open".into(),
@@ -178,6 +178,7 @@ impl Server {
             }
             other => return Err(format!("неизвестная команда `{other}`")),
         }
+        self.document.arrange();
         if self.document.model != before && op != "handler" {
             self.persist()?;
         }
@@ -223,6 +224,21 @@ impl Server {
                 "fore_color" => c.fore_color = optional,
                 "back_color" => c.back_color = optional,
                 "custom" => c.custom = optional,
+                "dock" => match Dock::ALL.into_iter().find(|d| d.name() == text) {
+                    Some(dock) => c.dock = dock,
+                    None => known = false,
+                },
+                _ if property.starts_with("anchor:") => {
+                    match Side::ALL.into_iter().find(|s| property.ends_with(s.name())) {
+                        Some(side) if flag == Some(true) => {
+                            c.anchor.insert(side);
+                        }
+                        Some(side) => {
+                            c.anchor.remove(&side);
+                        }
+                        None => known = false,
+                    }
+                }
                 _ => match (event, optional) {
                     (Some(event), Some(handler)) => {
                         c.events.insert(event, handler);
@@ -254,6 +270,8 @@ impl Server {
                     "name": c.name, "kind": c.kind.name(), "parent": c.parent, "custom": c.custom,
                     "x": c.x, "y": c.y, "width": c.width, "height": c.height,
                     "frame": [x, y, w, h], "text": c.text, "visible": c.visible,
+                    "dock": c.dock.name(),
+                    "anchor": c.anchor.iter().map(|s| s.name()).collect::<Vec<_>>(),
                     "enabled": c.enabled, "checked": c.checked, "border": c.border,
                     "fore_color": c.fore_color, "back_color": c.back_color, "events": events,
                 })
@@ -289,7 +307,8 @@ pub fn run(path: &Path) -> ExitCode {
     let mut out = std::io::stdout().lock();
     for line in std::io::stdin().lock().lines() {
         let Ok(line) = line else { break };
-        let reply = match serde_json::from_str::<Value>(&line) {
+        // .NET может начать поток с метки порядка байтов.
+        let reply = match serde_json::from_str::<Value>(line.trim_start_matches('\u{feff}')) {
             Ok(request) => server.handle(&request),
             Err(error) => json!({ "error": error.to_string() }),
         };
@@ -329,12 +348,23 @@ mod tests {
         let reply = send(json!({"op": "handler", "name": "ok"}));
         assert!(reply["open"]["file"].as_str().unwrap().ends_with("main_form.rs"));
         let code = fs::read_to_string(dir.join("main_form.designer.rs")).unwrap();
-        assert!(code.contains("events.on_click(ok, MainForm::ok_click);"));
+        assert!(code.contains("view.on_click(ok_id, Self::ok_click);"));
 
         send(json!({"op": "bounds", "name": "ok", "x": 300, "y": 200, "width": 90,
                     "height": 28, "moved": true}));
         let reply = send(json!({"op": "undo"}));
         assert_eq!(reply["state"]["controls"][1]["x"], 16.0);
+
+        send(json!({"op": "set", "name": "ok", "property": "anchor:right", "value": true}));
+        send(json!({"op": "set", "name": "ok", "property": "anchor:left", "value": false}));
+        let reply = send(json!({"op": "formSize", "width": 580, "height": 320}));
+        assert_eq!(reply["state"]["controls"][1]["x"], 16.0, "кнопка в панели не двигается");
+        let reply = send(json!({"op": "set", "name": "panel1", "property": "dock", "value": "fill"}));
+        assert_eq!(reply["state"]["controls"][0]["width"], 580.0);
+        // Панель растянулась на 380 — правый якорь внутри неё отработал.
+        assert_eq!(reply["state"]["controls"][1]["x"], 396.0);
+        let code = fs::read_to_string(dir.join("main_form.designer.rs")).unwrap();
+        assert!(code.contains("set_dock(Dock::Fill)") && code.contains("set_anchor(Anchor::TOP | Anchor::RIGHT)"));
 
         // Правка .rfrm снаружи подхватывается.
         let text = fs::read_to_string(&rfrm).unwrap().replace("title = \"MainForm\"", "title = \"Z\"");

@@ -1,7 +1,7 @@
 //! Правая панель: свойства и события выбранного контрола или самой формы.
 
 use eframe::egui::{self, DragValue, Grid, TextEdit};
-use rustforms_model::{Event, Kind};
+use rustforms_model::{Dock, Event, Kind, Side};
 
 use crate::{
     app::{Designer, Request},
@@ -180,6 +180,31 @@ fn control_properties(
             }
             Kind::Button | Kind::TextBox => {}
         }
+        ui.label("Dock");
+        egui::ComboBox::from_id_salt(("dock", name))
+            .selected_text(c.dock.name())
+            .show_ui(ui, |ui| {
+                for dock in Dock::ALL {
+                    ui.selectable_value(&mut c.dock, dock, dock.name());
+                }
+            });
+        ui.end_row();
+        ui.label("Якорь");
+        ui.add_enabled_ui(c.dock == Dock::None, |ui| {
+            ui.horizontal(|ui| {
+                for side in Side::ALL {
+                    let mut on = c.anchor.contains(&side);
+                    if ui.checkbox(&mut on, side.name()).changed() {
+                        if on {
+                            c.anchor.insert(side);
+                        } else {
+                            c.anchor.remove(&side);
+                        }
+                    }
+                }
+            });
+        });
+        ui.end_row();
         ui.label("Свой тип").on_hover_text(
             "Путь к своему контролу на базе этого, например crate::round_button::RoundButton. \
              Тип должен реализовывать Default.",

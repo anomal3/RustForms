@@ -40,8 +40,8 @@ fn double_click_adds_handler_once_and_keeps_user_code() {
 
     attach_handler(&rfrm, None, None).unwrap();
     let designer = fs::read_to_string(dir.join("main_form.designer.rs")).unwrap();
-    assert!(designer.contains("events.on_load(MainForm::main_form_load);"));
-    assert!(designer.contains("events.on_click(button1, MainForm::button1_click);"));
+    assert!(designer.contains("view.on_load(Self::main_form_load);"));
+    assert!(designer.contains("view.on_click(button1_id, Self::button1_click);"));
     fs::remove_dir_all(dir).unwrap();
 }
 

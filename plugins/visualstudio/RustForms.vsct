@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <Extern href="stdidcmd.h" />
+  <Extern href="vsshlids.h" />
+  <Commands package="guidPackage">
+    <Groups>
+      <Group guid="guidCommands" id="MenuGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_TOOLS" />
+      </Group>
+    </Groups>
+    <Buttons>
+      <Button guid="guidCommands" id="NewProject" priority="0x0100" type="Button">
+        <Parent guid="guidCommands" id="MenuGroup" />
+        <Strings><ButtonText>RustForms: новый проект…</ButtonText></Strings>
+      </Button>
+      <Button guid="guidCommands" id="NewForm" priority="0x0101" type="Button">
+        <Parent guid="guidCommands" id="MenuGroup" />
+        <Strings><ButtonText>RustForms: новая форма…</ButtonText></Strings>
+      </Button>
+      <Button guid="guidCommands" id="OpenForm" priority="0x0102" type="Button">
+        <Parent guid="guidCommands" id="MenuGroup" />
+        <Strings><ButtonText>RustForms: открыть форму…</ButtonText></Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+  <Symbols>
+    <GuidSymbol name="guidPackage" value="{7d1f3b52-6c1e-4c8a-9d57-2f0b8a3e91c4}" />
+    <GuidSymbol name="guidCommands" value="{a4c9e0d1-35b7-4f62-8e1a-90d4b7c2f518}">
+      <IDSymbol name="MenuGroup" value="0x1020" />
+      <IDSymbol name="NewProject" value="0x0100" />
+      <IDSymbol name="NewForm" value="0x0101" />
+      <IDSymbol name="OpenForm" value="0x0102" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>

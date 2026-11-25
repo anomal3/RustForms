@@ -1,6 +1,8 @@
 use std::fmt::Write;
 
-use crate::{Control, Error, Event, FormModel, Kind, model::parse_color};
+use crate::{
+    Control, Dock, Error, Event, FormModel, Kind, default_anchor, model::parse_color,
+};
 
 /// Содержимое `*.designer.rs`. Модуль подключается из файла формы как дочерний.
 pub fn designer_code(model: &FormModel) -> Result<String, Error> {
@@ -24,22 +26,20 @@ pub fn designer_code(model: &FormModel) -> Result<String, Error> {
     line!("");
     line!("use rustforms::prelude::*;");
     line!("");
-    line!("use super::{name};");
+    line!("use super::Data;");
     line!("");
+    line!("/// Форма: её контролы и твои данные (`data`). Обработчики — в соседнем файле.");
     line!("#[allow(dead_code)]");
-    if model.controls.is_empty() {
-        line!("pub struct Controls {{}}");
-    } else {
-        line!("pub struct Controls {{");
-        for c in &model.controls {
-            line!("    pub {}: Handle<{}>,", c.name, type_name(c));
-        }
-        line!("}}");
+    line!("pub struct {name} {{");
+    line!("    pub data: Data,");
+    for c in &model.controls {
+        line!("    pub {}: {},", c.name, type_name(c));
     }
+    line!("}}");
     line!("");
-    line!("impl Controls {{");
-    line!("    pub fn build(events: &mut Events<{name}>) -> (Ui, Self) {{");
-    let mutable = if model.controls.is_empty() && form.back_color.is_none() { "" } else { "mut " };
+    line!("impl {name} {{");
+    line!("    pub fn create() -> Application<Self> {{");
+    let mutable = if form.back_color.is_none() { "" } else { "mut " };
     line!(
         "        let {mutable}ui = Ui::new({:?}, {:?}, {:?});",
         form.title,
@@ -50,6 +50,7 @@ pub fn designer_code(model: &FormModel) -> Result<String, Error> {
         line!("        ui.back_color = {};", color_code(color)?);
     }
 
+    // Сначала значения контролов, затем структура из них.
     for c in &model.controls {
         line!("");
         let constructor = match (&c.custom, c.kind) {
@@ -62,45 +63,52 @@ pub fn designer_code(model: &FormModel) -> Result<String, Error> {
         let place = format!(".at({:?}, {:?}).size({:?}, {:?})", c.x, c.y, c.width, c.height);
         let setup = setup_lines(c)?;
         if setup.is_empty() {
-            line!("        let control = {constructor}{place};");
+            line!("        let {} = {constructor}{place};", c.name);
         } else {
-            line!("        let mut control = {constructor}{place};");
+            line!("        let mut {} = {constructor}{place};", c.name);
             for setting in setup {
-                line!("        control.{setting};");
-            }
-        }
-        match &c.parent {
-            Some(parent) => {
-                line!("        let {} = ui.add_to({parent}, control);", c.name);
-            }
-            None => {
-                line!("        let {} = ui.add(control);", c.name);
+                line!("        {}.{setting};", c.name);
             }
         }
     }
+    line!("");
+    line!("        let form = Self {{");
+    line!("            data: Data::default(),");
+    for c in &model.controls {
+        line!("            {},", c.name);
+    }
+    line!("        }};");
 
     line!("");
-    if model.handlers().is_empty() {
-        line!("        let _ = events;");
+    let empty = model.controls.is_empty() && form.load.is_none();
+    line!("        let {}view = View::new();", if empty { "" } else { "mut " });
+    for c in &model.controls {
+        let field = format!("|f: &mut Self| &mut f.{}", c.name);
+        // Номер нужен только тем, на кого ссылаются: событиям и дочерним контролам.
+        let used = !c.events.is_empty()
+            || model.controls.iter().any(|child| child.parent.as_deref() == Some(&c.name));
+        let binding = if used { format!("let {}_id = ", c.name) } else { String::new() };
+        match &c.parent {
+            Some(parent) => {
+                line!("        {binding}view.add_to({parent}_id, {field});");
+            }
+            None => {
+                line!("        {binding}view.add({field});");
+            }
+        }
     }
     if let Some(handler) = &form.load {
-        line!("        events.on_load({name}::{handler});");
+        line!("        view.on_load(Self::{handler});");
     }
     for c in &model.controls {
         for (event, handler) in &c.events {
             if *event != Event::Load {
-                line!("        events.on_{}({}, {name}::{handler});", event.name(), c.name);
+                line!("        view.on_{}({}_id, Self::{handler});", event.name(), c.name);
             }
         }
     }
-
-    let fields: Vec<&str> = model.controls.iter().map(|c| c.name.as_str()).collect();
     line!("");
-    if fields.is_empty() {
-        line!("        (ui, Self {{}})");
-    } else {
-        line!("        (ui, Self {{ {} }})", fields.join(", "));
-    }
+    line!("        Application::new(ui, form, view)");
     line!("    }}");
     line!("}}");
     Ok(out)
@@ -123,6 +131,23 @@ fn setup_lines(c: &Control) -> Result<Vec<String>, Error> {
     }
     if c.kind == Kind::CheckBox && c.checked {
         lines.push("set_checked(true)".into());
+    }
+    if c.dock != Dock::None {
+        let side = match c.dock {
+            Dock::Top => "Top",
+            Dock::Bottom => "Bottom",
+            Dock::Left => "Left",
+            Dock::Right => "Right",
+            Dock::Fill => "Fill",
+            Dock::None => "None",
+        };
+        lines.push(format!("set_dock(Dock::{side})"));
+    } else if c.anchor != default_anchor() {
+        let sides: Vec<String> =
+            c.anchor.iter().map(|s| format!("Anchor::{}", s.name().to_uppercase())).collect();
+        let value =
+            if sides.is_empty() { "Anchor::NONE".to_owned() } else { sides.join(" | ") };
+        lines.push(format!("set_anchor({value})"));
     }
     if !c.visible {
         lines.push("set_visible(false)".into());

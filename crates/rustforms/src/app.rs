@@ -1,8 +1,8 @@
 use tiny_skia::Pixmap;
 
 use crate::{
-    ControlId, EventCx, Events, Key, Modifiers, Painter, Point, Rect, TextSystem, Ui, VisualState,
-    events::Signal,
+    Dock, AnyControl, ControlId, EventCx, Key, Modifiers, Painter, Point, Rect, TextSystem, Ui, View,
+    VisualState, layout, view::Signal,
 };
 
 /// Системный буфер обмена; без него (тесты, нет доступа) — внутренний.
@@ -30,27 +30,32 @@ impl Clipboard {
     }
 }
 
-/// Форма вместе с состоянием и подписками. Не зависит от окна, поэтому ввод
-/// можно подавать из тестов, а кадр рисовать в память.
+/// Окно, форма с её контролами (`state`) и описание формы. Не зависит от настоящего окна,
+/// поэтому ввод можно подавать из тестов, а кадр рисовать в память.
+///
+/// Внутри контролы обозначаются номером по порядку в [`View`].
 pub struct Application<S> {
     pub ui: Ui,
     pub state: S,
-    events: Events<S>,
+    view: View<S>,
     text: TextSystem,
     clipboard: Clipboard,
-    focus: Option<ControlId>,
-    hover: Option<ControlId>,
-    capture: Option<ControlId>,
+    focus: Option<usize>,
+    hover: Option<usize>,
+    capture: Option<usize>,
     mouse: Point,
     loaded: bool,
+    /// Размер родителя каждого контрола при прошлом размещении: якоря считают от разницы.
+    parent_sizes: Vec<(f32, f32)>,
 }
 
-impl<S> Application<S> {
-    pub fn new(ui: Ui, state: S, events: Events<S>) -> Self {
-        Self {
+impl<S: 'static> Application<S> {
+    pub fn new(ui: Ui, state: S, view: View<S>) -> Self {
+        let mut app = Self {
             ui,
             state,
-            events,
+            view,
+            parent_sizes: Vec::new(),
             text: TextSystem::new(),
             clipboard: Clipboard { system: None, local: String::new() },
             focus: None,
@@ -58,7 +63,63 @@ impl<S> Application<S> {
             capture: None,
             mouse: Point::default(),
             loaded: false,
+        };
+        app.reset_layout();
+        app
+    }
+
+    fn parent_size(&mut self, index: usize) -> (f32, f32) {
+        match self.parent(index) {
+            Some(parent) => {
+                let bounds = self.control(parent).base().bounds;
+                (bounds.width, bounds.height)
+            }
+            None => (self.ui.width, self.ui.height),
         }
+    }
+
+    /// Текущие размеры считаются исходными для якорей.
+    fn reset_layout(&mut self) {
+        self.parent_sizes =
+            (0..self.view.nodes.len()).map(|i| self.parent_size(i)).collect();
+        self.layout();
+    }
+
+    /// Применяет якоря и Dock. Вызывается перед вводом и отрисовкой.
+    pub fn layout(&mut self) {
+        // Родители стоят в списке раньше детей, поэтому хватает одного прохода по уровням.
+        let mut parents: Vec<Option<usize>> = vec![None];
+        parents.extend((0..self.view.nodes.len()).map(Some));
+        for parent in parents {
+            let children: Vec<usize> =
+                (0..self.view.nodes.len()).filter(|&i| self.parent(i) == parent).collect();
+            let Some(&first) = children.first() else { continue };
+            let size = self.parent_size(first);
+            let mut docked = Vec::new();
+            for &index in &children {
+                let (old_w, old_h) = std::mem::replace(&mut self.parent_sizes[index], size);
+                let base = self.control(index).base_mut();
+                if base.dock == Dock::None {
+                    base.bounds =
+                        layout::anchored(base.bounds, base.anchor, size.0 - old_w, size.1 - old_h);
+                } else if base.visible {
+                    docked.push((index, (base.dock, base.bounds)));
+                }
+            }
+            let mut rects: Vec<_> = docked.iter().map(|d| d.1).collect();
+            layout::dock(size, &mut rects);
+            for ((index, _), (_, rect)) in docked.into_iter().zip(rects) {
+                self.control(index).base_mut().bounds = rect;
+            }
+        }
+    }
+
+    /// Заменяет форму целиком, не загружая шрифты заново.
+    pub fn replace(&mut self, ui: Ui, state: S, view: View<S>) {
+        (self.ui, self.state, self.view) = (ui, state, view);
+        (self.focus, self.hover, self.capture) = (None, None, None);
+        self.loaded = false;
+        self.reset_layout();
     }
 
     pub(crate) fn use_system_clipboard(&mut self) {
@@ -69,25 +130,72 @@ impl<S> Application<S> {
     pub fn load(&mut self) {
         if !self.loaded {
             self.loaded = true;
-            self.events.load(&mut self.state, &mut self.ui);
+            self.view.load(&mut self.state, &mut self.ui);
+            self.layout();
         }
     }
 
     pub fn focused(&self) -> Option<ControlId> {
-        self.focus
+        self.focus.map(|i| self.view.nodes[i].id)
     }
 
     pub fn close_requested(&self) -> bool {
         self.ui.close_requested
     }
 
+    fn control(&mut self, index: usize) -> &mut (dyn AnyControl + 'static) {
+        (self.view.nodes[index].get)(&mut self.state)
+    }
+
+    fn parent(&self, index: usize) -> Option<usize> {
+        let parent = self.view.nodes[index].parent?;
+        self.view.nodes.iter().position(|n| n.id == parent)
+    }
+
+    /// Положение контрола в координатах окна и видимая часть (обрезка родителями).
+    fn placement(&mut self, index: usize) -> (Rect, Rect) {
+        let own = self.control(index).base().bounds;
+        let (origin, clip) = match self.parent(index) {
+            Some(parent) => {
+                let (rect, clip) = self.placement(parent);
+                (Point::new(rect.x, rect.y), clip)
+            }
+            None => (Point::default(), Rect::new(0.0, 0.0, f32::MAX, f32::MAX)),
+        };
+        let rect = Rect::new(origin.x + own.x, origin.y + own.y, own.width, own.height);
+        (rect, rect.intersect(&clip))
+    }
+
+    /// Виден ли контрол с учётом всех родителей.
+    fn is_shown(&mut self, index: usize) -> bool {
+        self.control(index).base().visible
+            && self.parent(index).is_none_or(|p| self.is_shown(p))
+    }
+
+    fn is_active(&mut self, index: usize) -> bool {
+        self.control(index).base().enabled
+            && self.parent(index).is_none_or(|p| self.is_active(p))
+    }
+
+    fn hit_test(&mut self, at: Point) -> Option<usize> {
+        (0..self.view.nodes.len())
+            .rev()
+            .find(|&i| self.is_shown(i) && self.placement(i).1.contains(at))
+    }
+
+    fn can_focus(&mut self, index: usize) -> bool {
+        self.control(index).base().tab_stop && self.is_shown(index) && self.is_active(index)
+    }
+
     fn with_control(
         &mut self,
-        id: ControlId,
-        action: impl FnOnce(&mut dyn crate::AnyControl, Point, &mut EventCx),
+        index: usize,
+        action: impl FnOnce(&mut dyn AnyControl, Point, &mut EventCx),
     ) {
-        let (rect, _) = self.ui.placement(id);
+        let (rect, _) = self.placement(index);
         let local = Point::new(self.mouse.x - rect.x, self.mouse.y - rect.y);
+        let node = &self.view.nodes[index];
+        let id = node.id;
         let mut signals: Vec<Signal> = Vec::new();
         let mut cx = EventCx {
             text: &mut self.text,
@@ -95,17 +203,20 @@ impl<S> Application<S> {
             signals: &mut signals,
             size: (rect.width, rect.height),
         };
-        action(&mut *self.ui.nodes[id.0].control, local, &mut cx);
+        action((node.get)(&mut self.state), local, &mut cx);
         for signal in signals {
-            self.events.dispatch(id, signal, &mut self.state, &mut self.ui);
+            self.view.dispatch(id, signal, &mut self.state, &mut self.ui);
         }
+        // Обработчик мог изменить размеры или видимость.
+        self.layout();
     }
 
     pub fn mouse_move(&mut self, at: Point) {
+        self.layout();
         self.mouse = at;
-        self.hover = self.ui.hit_test(at);
-        if let Some(id) = self.capture {
-            self.with_control(id, |c, local, cx| c.on_mouse_drag(local, cx));
+        self.hover = self.hit_test(at);
+        if let Some(index) = self.capture {
+            self.with_control(index, |c, local, cx| c.on_mouse_drag(local, cx));
         }
     }
 
@@ -114,21 +225,26 @@ impl<S> Application<S> {
     }
 
     pub fn mouse_down(&mut self, mods: Modifiers) {
-        let Some(id) = self.ui.hit_test(self.mouse) else { return };
-        if !self.ui.is_active(id) {
+        let Some(index) = self.hit_test(self.mouse) else { return };
+        if !self.is_active(index) {
             return;
         }
-        if self.ui.can_focus(id) {
-            self.focus = Some(id);
+        if self.can_focus(index) {
+            self.focus = Some(index);
         }
-        self.capture = Some(id);
-        self.with_control(id, |c, local, cx| c.on_mouse_down(local, mods, cx));
+        self.capture = Some(index);
+        self.with_control(index, |c, local, cx| c.on_mouse_down(local, mods, cx));
     }
 
     pub fn mouse_up(&mut self) {
-        let Some(id) = self.capture.take() else { return };
-        let inside = self.ui.hit_test(self.mouse) == Some(id);
-        self.with_control(id, |c, local, cx| c.on_mouse_up(local, inside, cx));
+        let Some(index) = self.capture.take() else { return };
+        let inside = self.hit_test(self.mouse) == Some(index);
+        self.with_control(index, |c, local, cx| c.on_mouse_up(local, inside, cx));
+    }
+
+    fn focus_target(&mut self) -> Option<usize> {
+        let index = self.focus?;
+        self.can_focus(index).then_some(index)
     }
 
     pub fn key(&mut self, key: Key, mods: Modifiers) {
@@ -136,26 +252,24 @@ impl<S> Application<S> {
             self.move_focus(mods.shift);
             return;
         }
-        if let Some(id) = self.focus.filter(|&id| self.ui.can_focus(id)) {
-            self.with_control(id, |c, _, cx| c.on_key(key, mods, cx));
+        if let Some(index) = self.focus_target() {
+            self.with_control(index, |c, _, cx| c.on_key(key, mods, cx));
         }
     }
 
     pub fn text_input(&mut self, text: &str) {
-        if let Some(id) = self.focus.filter(|&id| self.ui.can_focus(id)) {
-            self.with_control(id, |c, _, cx| c.on_text_input(text, cx));
+        if let Some(index) = self.focus_target() {
+            self.with_control(index, |c, _, cx| c.on_text_input(text, cx));
         }
     }
 
     fn move_focus(&mut self, backwards: bool) {
-        let order: Vec<ControlId> = (0..self.ui.nodes.len())
-            .map(ControlId)
-            .filter(|&id| self.ui.can_focus(id))
-            .collect();
+        let order: Vec<usize> =
+            (0..self.view.nodes.len()).filter(|&i| self.can_focus(i)).collect();
         if order.is_empty() {
             return;
         }
-        let current = self.focus.and_then(|f| order.iter().position(|&id| id == f));
+        let current = self.focus.and_then(|f| order.iter().position(|&i| i == f));
         let next = match (current, backwards) {
             (Some(i), false) => (i + 1) % order.len(),
             (Some(i), true) => (i + order.len() - 1) % order.len(),
@@ -167,30 +281,30 @@ impl<S> Application<S> {
 
     /// Рисует форму. `scale` — масштаб экрана (1.0 = 96 DPI).
     pub fn render(&mut self, pixmap: &mut Pixmap, scale: f32) {
+        self.layout();
         let back = self.ui.back_color;
         pixmap.fill(tiny_skia::Color::from_rgba8(back.r, back.g, back.b, 255));
-        for index in 0..self.ui.nodes.len() {
-            let id = ControlId(index);
-            if !self.ui.is_shown(id) {
+        let window = Rect::new(
+            0.0,
+            0.0,
+            pixmap.width() as f32 / scale,
+            pixmap.height() as f32 / scale,
+        );
+        for index in 0..self.view.nodes.len() {
+            if !self.is_shown(index) {
                 continue;
             }
-            let (frame, clip) = self.ui.placement(id);
-            let window = Rect::new(
-                0.0,
-                0.0,
-                pixmap.width() as f32 / scale,
-                pixmap.height() as f32 / scale,
-            );
+            let (frame, clip) = self.placement(index);
             let clip = clip.intersect(&window);
             if clip.is_empty() {
                 continue;
             }
-            let hovered = self.hover == Some(id);
+            let hovered = self.hover == Some(index);
             let state = VisualState {
-                focused: self.focus == Some(id),
+                focused: self.focus == Some(index),
                 hovered,
-                pressed: hovered && self.capture == Some(id),
-                enabled: self.ui.is_active(id),
+                pressed: hovered && self.capture == Some(index),
+                enabled: self.is_active(index),
             };
             let mut painter = Painter {
                 pixmap: &mut *pixmap,
@@ -200,7 +314,7 @@ impl<S> Application<S> {
                 clip,
                 state,
             };
-            self.ui.nodes[index].control.on_paint(&mut painter);
+            (self.view.nodes[index].get)(&mut self.state).on_paint(&mut painter);
         }
     }
 }

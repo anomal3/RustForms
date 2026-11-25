@@ -124,7 +124,7 @@ impl Designer {
                 if let Ok(model) = load(&open.path) {
                     // Назначение обработчика — тоже правка, её можно отменить.
                     open.document.checkpoint(None);
-                    open.document.model = model.clone();
+                    open.document.reset(model.clone());
                     open.saved = model;
                 }
                 let file = at.file.display();
@@ -405,7 +405,7 @@ impl Designer {
                 if ui.button("Не сохранять").clicked() {
                     self.pending = None;
                     if let Some(open) = &mut self.open {
-                        open.document.model = open.saved.clone();
+                        open.document.reset(open.saved.clone());
                     }
                     self.perform(ctx, request.clone());
                 }
@@ -447,6 +447,10 @@ impl eframe::App for Designer {
             if let Some(open) = &mut self.open {
                 open.document.end_merge();
             }
+        }
+
+        if let Some(open) = &mut self.open {
+            open.document.arrange();
         }
 
         if let Some(request) = self.request.take() {

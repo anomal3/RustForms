@@ -11,7 +11,7 @@ mod project;
 
 pub use generate::designer_code;
 pub use handlers::{Inserted, ensure_handler};
-pub use model::{Control, Event, FormModel, FormProps, Kind};
+pub use model::{Control, Dock, Event, FormModel, FormProps, Kind, Side, default_anchor};
 pub use project::{Location, attach_handler, load, new_form, new_project, save};
 
 #[derive(Debug)]

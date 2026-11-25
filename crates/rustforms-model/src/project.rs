@@ -56,19 +56,13 @@ fn template(name: &str, stem: &str) -> String {
 #[path = \"{stem}.designer.rs\"]
 mod designer;
 
-use designer::Controls;
+pub use designer::{name};
 
-pub struct {name} {{
-    #[allow(dead_code)]
-    controls: Controls,
-}}
+/// Свои данные формы: добавляй поля сюда, в обработчиках они доступны как `self.data`.
+#[derive(Default)]
+pub struct Data {{}}
 
 impl {name} {{
-    pub fn create() -> Application<Self> {{
-        let mut events = Events::new();
-        let (ui, controls) = Controls::build(&mut events);
-        Application::new(ui, Self {{ controls }}, events)
-    }}
 }}
 "
     )

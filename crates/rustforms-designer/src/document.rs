@@ -1,6 +1,9 @@
 //! Редактируемая форма: операции над моделью и отмена. Без привязки к окну.
 
-use rustforms_model::{Control, FormModel, Kind};
+use std::collections::BTreeSet;
+
+use rustforms::{Anchor, Rect, layout};
+use rustforms_model::{Control, Dock, FormModel, Kind, Side};
 
 pub type Frame = (f32, f32, f32, f32);
 
@@ -13,11 +16,93 @@ pub struct Document {
     redo: Vec<FormModel>,
     /// Подряд идущие правки с одним ключом отменяются за один раз.
     merge: Option<String>,
+    /// Модель после прошлого размещения: якоря считают, насколько изменился родитель.
+    laid: FormModel,
+}
+
+fn anchor_of(sides: &BTreeSet<Side>) -> Anchor {
+    Anchor {
+        left: sides.contains(&Side::Left),
+        top: sides.contains(&Side::Top),
+        right: sides.contains(&Side::Right),
+        bottom: sides.contains(&Side::Bottom),
+    }
+}
+
+fn dock_of(dock: Dock) -> rustforms::Dock {
+    match dock {
+        Dock::None => rustforms::Dock::None,
+        Dock::Top => rustforms::Dock::Top,
+        Dock::Bottom => rustforms::Dock::Bottom,
+        Dock::Left => rustforms::Dock::Left,
+        Dock::Right => rustforms::Dock::Right,
+        Dock::Fill => rustforms::Dock::Fill,
+    }
+}
+
+fn size_of(model: &FormModel, parent: Option<&str>) -> Option<(f32, f32)> {
+    match parent {
+        None => Some((model.form.width, model.form.height)),
+        Some(name) => {
+            model.controls.iter().find(|c| c.name == name).map(|c| (c.width, c.height))
+        }
+    }
 }
 
 impl Document {
     pub fn new(model: FormModel) -> Self {
-        Self { model, selected: None, undo: Vec::new(), redo: Vec::new(), merge: None }
+        let laid = model.clone();
+        let mut document =
+            Self { model, selected: None, undo: Vec::new(), redo: Vec::new(), merge: None, laid };
+        document.arrange();
+        document
+    }
+
+    /// Применяет якоря и Dock после изменений: как в дизайнере WinForms, привязанные
+    /// контролы следуют за размером формы и панелей.
+    pub fn arrange(&mut self) {
+        let mut parents: Vec<Option<String>> = vec![None];
+        parents.extend(
+            self.model.controls.iter().filter(|c| c.kind == Kind::Panel).map(|c| Some(c.name.clone())),
+        );
+        for parent in parents {
+            let Some(size) = size_of(&self.model, parent.as_deref()) else { continue };
+            let old = size_of(&self.laid, parent.as_deref()).unwrap_or(size);
+            let (dw, dh) = (size.0 - old.0, size.1 - old.1);
+            let mut docked = Vec::new();
+            for (i, c) in self.model.controls.iter_mut().enumerate() {
+                if c.parent != parent {
+                    continue;
+                }
+                let rect = Rect::new(c.x, c.y, c.width, c.height);
+                if c.dock != Dock::None {
+                    if c.visible {
+                        docked.push((i, (dock_of(c.dock), rect)));
+                    }
+                } else if (dw, dh) != (0.0, 0.0)
+                    // Только что перенесённый или добавленный не двигается.
+                    && self.laid.controls.iter().any(|o| o.name == c.name && o.parent == c.parent)
+                {
+                    let moved = layout::anchored(rect, anchor_of(&c.anchor), dw, dh);
+                    (c.x, c.y) = (moved.x.round(), moved.y.round());
+                    (c.width, c.height) = (moved.width.max(1.0), moved.height.max(1.0));
+                }
+            }
+            let mut rects: Vec<_> = docked.iter().map(|d| d.1).collect();
+            layout::dock(size, &mut rects);
+            for ((i, _), (_, r)) in docked.into_iter().zip(rects) {
+                let c = &mut self.model.controls[i];
+                (c.x, c.y, c.width, c.height) = (r.x, r.y, r.width.max(1.0), r.height.max(1.0));
+            }
+        }
+        self.laid = self.model.clone();
+    }
+
+    /// Заменяет модель целиком (отмена, чтение с диска): якоря не применяются.
+    pub fn reset(&mut self, model: FormModel) {
+        self.model = model;
+        self.laid = self.model.clone();
+        self.arrange();
     }
 
     /// Запомнить состояние перед правкой.
@@ -80,6 +165,7 @@ impl Document {
 
     fn after_history(&mut self) {
         self.merge = None;
+        self.laid = self.model.clone();
         if self.selected.as_deref().is_some_and(|n| self.control(n).is_none()) {
             self.selected = None;
         }
@@ -306,6 +392,32 @@ mod tests {
         assert!(d.model.controls.is_empty());
         d.undo();
         assert_eq!(d.model.controls.len(), 3);
+    }
+
+    #[test]
+    fn anchored_and_docked_controls_follow_the_form() {
+        let mut d = document();
+        let right = d.add(Kind::Button, 300.0, 200.0);
+        d.control_mut(&right).unwrap().anchor = [Side::Right, Side::Bottom].into();
+        let wide = d.add(Kind::TextBox, 8.0, 8.0);
+        d.control_mut(&wide).unwrap().anchor = [Side::Left, Side::Top, Side::Right].into();
+        let bar = d.add(Kind::Panel, 8.0, 100.0);
+        d.control_mut(&bar).unwrap().dock = Dock::Bottom;
+        d.arrange();
+        let b = d.control(&bar).unwrap();
+        assert_eq!((b.x, b.y, b.width, b.height), (0.0, 220.0, 480.0, 100.0));
+
+        d.checkpoint(None);
+        d.model.form.width += 100.0;
+        d.model.form.height += 40.0;
+        d.arrange();
+        assert_eq!((d.control(&right).unwrap().x, d.control(&right).unwrap().y), (400.0, 240.0));
+        assert_eq!(d.control(&wide).unwrap().width, 260.0);
+        assert_eq!(d.control(&bar).unwrap().width, 580.0);
+
+        d.undo();
+        d.arrange();
+        assert_eq!(d.control(&right).unwrap().x, 300.0);
     }
 
     #[test]

@@ -1,6 +1,8 @@
 use std::{cell::RefCell, ops::Deref, rc::Rc};
 
-use crate::{CheckBox, Handle, TextBox, Ui, ui::ControlId};
+use crate::{
+    AnyControl, CheckBox, Container, ControlId, ControlImpl, Handle, TextBox, Ui,
+};
 
 /// [`TextBox`] и всё, что от него «унаследовано».
 pub trait RaisesTextChanged {}
@@ -41,21 +43,38 @@ pub(crate) enum Signal {
 }
 
 type Handler<S, A> = Box<dyn FnMut(&mut S, &mut Ui, &A)>;
+type Getter<S> = Box<dyn Fn(&mut S) -> &mut (dyn AnyControl + 'static)>;
 
-/// Подписки формы. `S` — твоя структура формы, поэтому обработчики это обычные методы
-/// вида `fn button1_click(&mut self, ui: &mut Ui, e: &ClickArgs)`.
+pub(crate) struct Node<S> {
+    pub id: ControlId,
+    pub parent: Option<ControlId>,
+    pub get: Getter<S>,
+}
+
+/// Помогает компилятору вывести замыкание с «любым» временем жизни.
+fn getter<S>(get: impl Fn(&mut S) -> &mut (dyn AnyControl + 'static) + 'static) -> Getter<S> {
+    Box::new(get)
+}
+
+/// Описание формы: где в структуре `S` лежат её контролы и какие у них обработчики.
+///
+/// Сами контролы — обычные поля твоей формы, поэтому в обработчике пишется
+/// `self.label1.set_text("...")`. Обработчики — обычные методы вида
+/// `fn button1_click(&mut self, ui: &mut Ui, e: &ClickArgs)`.
 ///
 /// События возникают только от действий пользователя: изменение свойства из кода их не вызывает.
-pub struct Events<S> {
+pub struct View<S> {
+    pub(crate) nodes: Vec<Node<S>>,
     load: Vec<Handler<S, LoadArgs>>,
     click: Vec<(ControlId, Handler<S, ClickArgs>)>,
     text_changed: Vec<(ControlId, Handler<S, TextChangedArgs>)>,
     checked_changed: Vec<(ControlId, Handler<S, CheckedChangedArgs>)>,
 }
 
-impl<S> Default for Events<S> {
+impl<S> Default for View<S> {
     fn default() -> Self {
         Self {
+            nodes: Vec::new(),
             load: Vec::new(),
             click: Vec::new(),
             text_changed: Vec::new(),
@@ -64,9 +83,38 @@ impl<S> Default for Events<S> {
     }
 }
 
-impl<S> Events<S> {
+impl<S: 'static> View<S> {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Показывает на форме контрол из поля структуры: `view.add(|f| &mut f.button1)`.
+    /// Порядок вызовов — это порядок отрисовки и перехода по Tab.
+    pub fn add<T: ControlImpl>(
+        &mut self,
+        field: impl Fn(&mut S) -> &mut T + 'static,
+    ) -> Handle<T> {
+        self.insert(None, field)
+    }
+
+    /// То же внутри панели; координаты контрола считаются от её угла.
+    pub fn add_to<P: Container, T: ControlImpl>(
+        &mut self,
+        panel: Handle<P>,
+        field: impl Fn(&mut S) -> &mut T + 'static,
+    ) -> Handle<T> {
+        self.insert(Some(panel.id()), field)
+    }
+
+    fn insert<T: ControlImpl>(
+        &mut self,
+        parent: Option<ControlId>,
+        field: impl Fn(&mut S) -> &mut T + 'static,
+    ) -> Handle<T> {
+        let handle = Handle::<T>::fresh();
+        let get = getter(move |state| field(state) as &mut (dyn AnyControl + 'static));
+        self.nodes.push(Node { id: handle.id(), parent, get });
+        handle
     }
 
     pub fn on_load(&mut self, handler: impl FnMut(&mut S, &mut Ui, &LoadArgs) + 'static) {
@@ -97,17 +145,13 @@ impl<S> Events<S> {
         self.checked_changed.push((control.id(), Box::new(handler)));
     }
 
-    /// Подключает базовую форму: `build` создаёт её контролы и подписки, а `part`
-    /// достаёт её из производной. Обработчики базовой формы вызываются раньше тех,
-    /// что подписаны после этого вызова.
+    /// Подключает базовую форму: `part` достаёт её из производной, а `build` добавляет
+    /// её контролы и подписки. Они идут раньше добавленных после этого вызова.
     pub fn include<B: 'static, R>(
         &mut self,
         part: fn(&mut S) -> &mut B,
-        build: impl FnOnce(&mut Events<B>) -> R,
-    ) -> R
-    where
-        S: 'static,
-    {
+        build: impl FnOnce(&mut View<B>) -> R,
+    ) -> R {
         fn adapt<S: 'static, B: 'static, A: 'static>(
             part: fn(&mut S) -> &mut B,
             handler: Handler<B, A>,
@@ -122,8 +166,16 @@ impl<S> Events<S> {
             list.into_iter().map(move |(id, h)| (id, adapt(part, h)))
         }
 
-        let mut inner = Events::<B>::new();
+        let mut inner = View::<B>::new();
         let result = build(&mut inner);
+        self.nodes.extend(inner.nodes.into_iter().map(|node| {
+            let get = node.get;
+            Node {
+                id: node.id,
+                parent: node.parent,
+                get: getter(move |state| get(part(state))),
+            }
+        }));
         self.load.extend(inner.load.into_iter().map(|h| adapt(part, h)));
         self.click.extend(adapt_all(part, inner.click));
         self.text_changed.extend(adapt_all(part, inner.text_changed));

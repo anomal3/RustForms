@@ -16,7 +16,7 @@ use crate::{Application, Key, Modifiers, Point};
 pub type RunError = Box<dyn Error>;
 
 /// Показывает форму и работает, пока её не закроют.
-pub fn run<S>(mut app: Application<S>) -> Result<(), RunError> {
+pub fn run<S: 'static>(mut app: Application<S>) -> Result<(), RunError> {
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
     app.use_system_clipboard();
@@ -40,7 +40,7 @@ struct Host<S> {
     error: Option<RunError>,
 }
 
-impl<S> Host<S> {
+impl<S: 'static> Host<S> {
     fn open(&self, event_loop: &ActiveEventLoop) -> Result<View, RunError> {
         let ui = &self.app.ui;
         let attributes = Window::default_attributes()
@@ -101,7 +101,7 @@ fn map_key(code: KeyCode, mods: Modifiers) -> Option<Key> {
     })
 }
 
-impl<S> ApplicationHandler for Host<S> {
+impl<S: 'static> ApplicationHandler for Host<S> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.view.is_some() {
             return;

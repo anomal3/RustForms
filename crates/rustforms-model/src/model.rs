@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -77,6 +77,68 @@ impl Event {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Side {
+    Left,
+    Top,
+    Right,
+    Bottom,
+}
+
+impl Side {
+    pub const ALL: [Side; 4] = [Side::Left, Side::Top, Side::Right, Side::Bottom];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Side::Left => "left",
+            Side::Top => "top",
+            Side::Right => "right",
+            Side::Bottom => "bottom",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Dock {
+    #[default]
+    None,
+    Top,
+    Bottom,
+    Left,
+    Right,
+    Fill,
+}
+
+impl Dock {
+    pub const ALL: [Dock; 6] =
+        [Dock::None, Dock::Top, Dock::Bottom, Dock::Left, Dock::Right, Dock::Fill];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Dock::None => "none",
+            Dock::Top => "top",
+            Dock::Bottom => "bottom",
+            Dock::Left => "left",
+            Dock::Right => "right",
+            Dock::Fill => "fill",
+        }
+    }
+}
+
+pub fn default_anchor() -> BTreeSet<Side> {
+    BTreeSet::from([Side::Left, Side::Top])
+}
+
+fn is_default_anchor(anchor: &BTreeSet<Side>) -> bool {
+    *anchor == default_anchor()
+}
+
+fn is_no_dock(dock: &Dock) -> bool {
+    *dock == Dock::None
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FormProps {
@@ -110,6 +172,11 @@ pub struct Control {
     pub height: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// Стороны родителя, к которым привязан контрол.
+    #[serde(default = "default_anchor", skip_serializing_if = "is_default_anchor")]
+    pub anchor: BTreeSet<Side>,
+    #[serde(default, skip_serializing_if = "is_no_dock")]
+    pub dock: Dock,
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub visible: bool,
     #[serde(default = "yes", skip_serializing_if = "is_true")]
@@ -153,6 +220,8 @@ impl Control {
             width,
             height,
             text,
+            anchor: default_anchor(),
+            dock: Dock::None,
             visible: true,
             enabled: true,
             checked: false,
@@ -265,6 +334,13 @@ impl FormModel {
                 ));
             }
             seen.insert(&c.name, c.kind);
+        }
+        // Эти имена занимает сгенерированный код.
+        if self.controls.iter().any(|c| c.name == "data") {
+            return fail("имя `data` занято: в нём лежат данные формы");
+        }
+        if self.handlers().iter().any(|(name, _)| *name == "create") {
+            return fail("имя `create` занято: так создаётся форма");
         }
         let mut signatures: HashMap<&str, Event> = HashMap::new();
         for (name, event) in self.handlers() {

@@ -110,7 +110,7 @@ fn build_a_form_with_the_mouse() {
     let code = fs::read_to_string(dir.join("main_form.rs")).unwrap();
     assert!(code.contains("fn button1_click(") && code.contains("fn main_form_load("));
     let designer = fs::read_to_string(dir.join("main_form.designer.rs")).unwrap();
-    assert!(designer.contains("ui.add_to(panel1, control)"));
+    assert!(designer.contains("view.add_to(panel1_id, |f: &mut Self| &mut f.button1)"));
 
     // Клавиатура: выбрать, подвинуть стрелкой, удалить, вернуть.
     click(&mut screen, at(160.0, 236.0));
