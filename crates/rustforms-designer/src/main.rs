@@ -40,7 +40,7 @@ fn run(args: &[&str]) -> Result<String, Error> {
             let event = match rest.get(1) {
                 None => None,
                 Some(&name) => Some(
-                    [Event::Load, Event::Click, Event::TextChanged, Event::CheckedChanged]
+                    Event::ALL
                         .into_iter()
                         .find(|e| e.name() == name)
                         .ok_or_else(|| Error(format!("неизвестное событие `{name}`")))?,

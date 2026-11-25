@@ -10,12 +10,49 @@ pub enum Kind {
     Label,
     TextBox,
     CheckBox,
+    RadioButton,
+    ComboBox,
+    ListBox,
+    ProgressBar,
+    MenuStrip,
     Panel,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 5] =
-        [Kind::Button, Kind::Label, Kind::TextBox, Kind::CheckBox, Kind::Panel];
+    pub const ALL: [Kind; 10] = [
+        Kind::Button,
+        Kind::Label,
+        Kind::TextBox,
+        Kind::CheckBox,
+        Kind::RadioButton,
+        Kind::ComboBox,
+        Kind::ListBox,
+        Kind::ProgressBar,
+        Kind::MenuStrip,
+        Kind::Panel,
+    ];
+
+    /// У этих контролов есть подпись, задаваемая конструктором.
+    pub fn captioned(self) -> bool {
+        matches!(self, Kind::Button | Kind::Label | Kind::CheckBox | Kind::RadioButton)
+    }
+
+    pub fn has_text(self) -> bool {
+        self.captioned() || self == Kind::TextBox
+    }
+
+    pub fn has_items(self) -> bool {
+        matches!(self, Kind::ComboBox | Kind::ListBox | Kind::MenuStrip)
+    }
+
+    /// Списки, в которых есть выбранная строка.
+    pub fn selectable(self) -> bool {
+        matches!(self, Kind::ComboBox | Kind::ListBox)
+    }
+
+    pub fn checkable(self) -> bool {
+        matches!(self, Kind::CheckBox | Kind::RadioButton)
+    }
 
     pub fn name(self) -> &'static str {
         match self {
@@ -23,6 +60,11 @@ impl Kind {
             Kind::Label => "Label",
             Kind::TextBox => "TextBox",
             Kind::CheckBox => "CheckBox",
+            Kind::RadioButton => "RadioButton",
+            Kind::ComboBox => "ComboBox",
+            Kind::ListBox => "ListBox",
+            Kind::ProgressBar => "ProgressBar",
+            Kind::MenuStrip => "MenuStrip",
             Kind::Panel => "Panel",
         }
     }
@@ -32,7 +74,11 @@ impl Kind {
             Kind::Button => (90.0, 28.0),
             Kind::Label => (120.0, 22.0),
             Kind::TextBox => (160.0, 28.0),
-            Kind::CheckBox => (140.0, 22.0),
+            Kind::CheckBox | Kind::RadioButton => (140.0, 22.0),
+            Kind::ComboBox => (160.0, 28.0),
+            Kind::ListBox => (160.0, 112.0),
+            Kind::ProgressBar => (200.0, 18.0),
+            Kind::MenuStrip => (300.0, 26.0),
             Kind::Panel => (200.0, 100.0),
         }
     }
@@ -42,8 +88,10 @@ impl Kind {
         match self {
             Kind::Button | Kind::Label => &[Event::Click],
             Kind::TextBox => &[Event::TextChanged],
-            Kind::CheckBox => &[Event::CheckedChanged, Event::Click],
-            Kind::Panel => &[],
+            Kind::CheckBox | Kind::RadioButton => &[Event::CheckedChanged, Event::Click],
+            Kind::ComboBox | Kind::ListBox => &[Event::SelectedChanged],
+            Kind::MenuStrip => &[Event::ItemClicked],
+            Kind::ProgressBar | Kind::Panel => &[],
         }
     }
 }
@@ -55,15 +103,28 @@ pub enum Event {
     Click,
     TextChanged,
     CheckedChanged,
+    SelectedChanged,
+    ItemClicked,
 }
 
 impl Event {
+    pub const ALL: [Event; 6] = [
+        Event::Load,
+        Event::Click,
+        Event::TextChanged,
+        Event::CheckedChanged,
+        Event::SelectedChanged,
+        Event::ItemClicked,
+    ];
+
     pub fn name(self) -> &'static str {
         match self {
             Event::Load => "load",
             Event::Click => "click",
             Event::TextChanged => "text_changed",
             Event::CheckedChanged => "checked_changed",
+            Event::SelectedChanged => "selected_changed",
+            Event::ItemClicked => "item_clicked",
         }
     }
 
@@ -73,6 +134,8 @@ impl Event {
             Event::Click => "ClickArgs",
             Event::TextChanged => "TextChangedArgs",
             Event::CheckedChanged => "CheckedChangedArgs",
+            Event::SelectedChanged => "SelectedChangedArgs",
+            Event::ItemClicked => "MenuItemArgs",
         }
     }
 }
@@ -181,9 +244,25 @@ pub struct Control {
     pub visible: bool,
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub enabled: bool,
-    /// Только `CheckBox`.
+    /// `CheckBox` и `RadioButton`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub checked: bool,
+    /// Только `TextBox`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub multiline: bool,
+    /// Строки `ComboBox` и `ListBox`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<String>,
+    /// Выбранная строка (с нуля).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected: Option<usize>,
+    /// Только `ProgressBar`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub value: i32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub minimum: i32,
+    #[serde(default = "hundred", skip_serializing_if = "is_hundred")]
+    pub maximum: i32,
     /// Только `Label`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fore_color: Option<String>,
@@ -195,6 +274,18 @@ pub struct Control {
     pub border: bool,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub events: BTreeMap<Event, String>,
+}
+
+fn is_zero(value: &i32) -> bool {
+    *value == 0
+}
+
+fn hundred() -> i32 {
+    100
+}
+
+fn is_hundred(value: &i32) -> bool {
+    *value == 100
 }
 
 fn yes() -> bool {
@@ -209,7 +300,7 @@ impl Control {
     pub fn new(kind: Kind, name: impl Into<String>, x: f32, y: f32) -> Self {
         let name = name.into();
         let (width, height) = kind.default_size();
-        let text = matches!(kind, Kind::Button | Kind::Label | Kind::CheckBox).then(|| name.clone());
+        let text = kind.captioned().then(|| name.clone());
         Self {
             kind,
             name,
@@ -221,10 +312,21 @@ impl Control {
             height,
             text,
             anchor: default_anchor(),
-            dock: Dock::None,
+            // Меню по умолчанию прижато к верхнему краю.
+            dock: if kind == Kind::MenuStrip { Dock::Top } else { Dock::None },
             visible: true,
             enabled: true,
             checked: false,
+            multiline: false,
+            items: if kind == Kind::MenuStrip {
+                vec!["Файл/Открыть".into(), "Файл/-".into(), "Файл/Выход".into()]
+            } else {
+                Vec::new()
+            },
+            selected: None,
+            value: 0,
+            minimum: 0,
+            maximum: 100,
             fore_color: None,
             back_color: None,
             border: true,
@@ -276,6 +378,11 @@ impl FormModel {
             Kind::Label => "label",
             Kind::TextBox => "text_box",
             Kind::CheckBox => "check_box",
+            Kind::RadioButton => "radio_button",
+            Kind::ComboBox => "combo_box",
+            Kind::ListBox => "list_box",
+            Kind::ProgressBar => "progress_bar",
+            Kind::MenuStrip => "menu_strip",
             Kind::Panel => "panel",
         };
         (1..)
@@ -322,6 +429,12 @@ impl FormModel {
             }
             if !(c.x.is_finite() && c.y.is_finite() && c.width >= 0.0 && c.height >= 0.0) {
                 return fail(format!("`{}`: неверные координаты или размер", c.name));
+            }
+            if c.selected.is_some_and(|i| i >= c.items.len()) {
+                return fail(format!("`{}`: выбранной строки нет в списке", c.name));
+            }
+            if c.maximum < c.minimum {
+                return fail(format!("`{}`: максимум меньше минимума", c.name));
             }
             color(&c.fore_color)?;
             color(&c.back_color)?;

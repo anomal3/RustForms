@@ -3,6 +3,9 @@
 pub enum Key {
     Left,
     Right,
+    Up,
+    Down,
+    Escape,
     Home,
     End,
     Backspace,

@@ -55,10 +55,10 @@ pub fn designer_code(model: &FormModel) -> Result<String, Error> {
         line!("");
         let constructor = match (&c.custom, c.kind) {
             (Some(path), _) => format!("<{path}>::default()"),
-            (None, Kind::TextBox | Kind::Panel) => format!("{}::new()", c.kind.name()),
-            (None, kind) => {
+            (None, kind) if kind.captioned() => {
                 format!("{}::new({:?})", kind.name(), c.text.as_deref().unwrap_or(""))
             }
+            (None, kind) => format!("{}::new()", kind.name()),
         };
         let place = format!(".at({:?}, {:?}).size({:?}, {:?})", c.x, c.y, c.width, c.height);
         let setup = setup_lines(c)?;
@@ -121,16 +121,35 @@ fn type_name(c: &Control) -> &str {
 /// Вызовы после конструктора: всё, что не задаётся им самим.
 fn setup_lines(c: &Control) -> Result<Vec<String>, Error> {
     let mut lines = Vec::new();
-    let text_in_constructor =
-        c.custom.is_none() && matches!(c.kind, Kind::Button | Kind::Label | Kind::CheckBox);
+    let text_in_constructor = c.custom.is_none() && c.kind.captioned();
+    // Режим задаётся до текста, иначе переводы строк потеряются.
+    if c.kind == Kind::TextBox && c.multiline {
+        lines.push("set_multiline(true)".into());
+    }
     if let Some(text) = &c.text
         && !text_in_constructor
-        && c.kind != Kind::Panel
+        && c.kind.has_text()
     {
         lines.push(format!("set_text({text:?})"));
     }
-    if c.kind == Kind::CheckBox && c.checked {
+    if c.kind.checkable() && c.checked {
         lines.push("set_checked(true)".into());
+    }
+    if c.kind.has_items() {
+        if !c.items.is_empty() {
+            lines.push(format!("set_items({:?})", c.items));
+        }
+        if let Some(selected) = c.selected.filter(|_| c.kind.selectable()) {
+            lines.push(format!("set_selected_index(Some({selected}))"));
+        }
+    }
+    if c.kind == Kind::ProgressBar {
+        if (c.minimum, c.maximum) != (0, 100) {
+            lines.push(format!("set_range({}, {})", c.minimum, c.maximum));
+        }
+        if c.value != 0 {
+            lines.push(format!("set_value({})", c.value));
+        }
     }
     if c.dock != Dock::None {
         let side = match c.dock {

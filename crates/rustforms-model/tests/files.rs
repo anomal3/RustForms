@@ -83,3 +83,41 @@ fn hello_example_is_up_to_date() {
     let on_disk = fs::read_to_string(dir.join("main_form.designer.rs")).unwrap();
     assert_eq!(on_disk.replace("\r\n", "\n"), designer_code(&model).unwrap());
 }
+
+#[test]
+fn every_kind_survives_save_and_generates_setup() {
+    let mut model = FormModel::new("F");
+    for kind in Kind::ALL {
+        let name = model.free_name(kind);
+        let mut c = Control::new(kind, name, 1.0, 2.0);
+        if kind.has_items() {
+            c.items = vec!["a \"b\"".into(), "в".into()];
+            c.selected = Some(1);
+        }
+        if kind.checkable() {
+            c.checked = true;
+        }
+        if kind == Kind::TextBox {
+            c.multiline = true;
+            c.text = Some("1\n2".into());
+        }
+        if kind == Kind::ProgressBar {
+            (c.minimum, c.maximum, c.value) = (5, 50, 7);
+        }
+        model.controls.push(c);
+    }
+    assert_eq!(FormModel::from_toml(&model.to_toml().unwrap()).unwrap(), model);
+    let code = designer_code(&model).unwrap();
+    for part in [
+        "set_multiline(true);\n        text_box1.set_text(\"1\\n2\")",
+        "combo_box1.set_items([\"a \\\"b\\\"\", \"в\"]);",
+        "list_box1.set_selected_index(Some(1));",
+        "radio_button1.set_checked(true);",
+        "progress_bar1.set_range(5, 50);",
+        "menu_strip1.set_dock(Dock::Top);",
+    ] {
+        assert!(code.contains(part), "{part}\n{code}");
+    }
+    model.controls.iter_mut().find(|c| c.name == "list_box1").unwrap().selected = Some(9);
+    assert!(model.validate().is_err());
+}

@@ -64,6 +64,7 @@ fn build(model: &FormModel) -> (Ui, Controls, View<Controls>) {
             }
             Kind::TextBox => {
                 let mut input = TextBox::new();
+                input.set_multiline(item.multiline);
                 input.set_text(text);
                 place(target, parent, item, input);
             }
@@ -71,6 +72,34 @@ fn build(model: &FormModel) -> (Ui, Controls, View<Controls>) {
                 let mut check = CheckBox::new(text);
                 check.set_checked(item.checked);
                 place(target, parent, item, check);
+            }
+            Kind::RadioButton => {
+                let mut radio = RadioButton::new(text);
+                radio.set_checked(item.checked);
+                place(target, parent, item, radio);
+            }
+            Kind::ComboBox => {
+                let mut combo = ComboBox::new();
+                combo.set_items(item.items.iter().cloned());
+                combo.set_selected_index(item.selected);
+                place(target, parent, item, combo);
+            }
+            Kind::ListBox => {
+                let mut list = ListBox::new();
+                list.set_items(item.items.iter().cloned());
+                list.set_selected_index(item.selected);
+                place(target, parent, item, list);
+            }
+            Kind::ProgressBar => {
+                let mut bar = ProgressBar::new();
+                bar.set_range(item.minimum, item.maximum);
+                bar.set_value(item.value);
+                place(target, parent, item, bar);
+            }
+            Kind::MenuStrip => {
+                let mut menu = MenuStrip::new();
+                menu.set_items(item.items.iter().cloned());
+                place(target, parent, item, menu);
             }
             Kind::Panel => {
                 let mut panel = Panel::new();

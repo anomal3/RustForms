@@ -155,6 +155,11 @@ namespace RustForms.VisualStudio
                 case "TextBox": return new TextBoxPropertiesObject(controller, control);
                 case "CheckBox": return new CheckBoxPropertiesObject(controller, control);
                 case "Panel": return new PanelPropertiesObject(controller, control);
+                case "RadioButton": return new CheckBoxPropertiesObject(controller, control);
+                case "ComboBox":
+                case "ListBox": return new ListPropertiesObject(controller, control);
+                case "ProgressBar": return new ProgressBarPropertiesObject(controller, control);
+                case "MenuStrip": return new MenuStripPropertiesObject(controller, control);
                 default: return new ControlPropertiesObject(controller, control);
             }
         }
@@ -192,6 +197,9 @@ namespace RustForms.VisualStudio
         [Category("Контрол"), DisplayName("Текст")]
         public string Text { get => Get("text"); set => Set("text", value); }
 
+        [Category("Поведение"), DisplayName("Многострочный")]
+        public bool Multiline { get => Flag("multiline"); set => Set("multiline", value); }
+
         [Category("События"), DisplayName("text_changed")]
         public string TextChanged { get => Handler("text_changed"); set => SetHandler("text_changed", value); }
     }
@@ -211,6 +219,58 @@ namespace RustForms.VisualStudio
 
         [Category("События"), DisplayName("click")]
         public string Click { get => Handler("click"); set => SetHandler("click", value); }
+    }
+
+    internal sealed class ListPropertiesObject : ControlPropertiesObject
+    {
+        public ListPropertiesObject(FormController c, JObject o) : base(c, o) { }
+
+        // Массив строк PropertyGrid редактирует своим окошком.
+        [Category("Контрол"), DisplayName("Строки")]
+        public string[] Items
+        {
+            get => ((JArray)Data["items"]).Select(i => (string)i).ToArray();
+            set => Set("items", value);
+        }
+
+        [Category("Контрол"), DisplayName("Выбрана (с 0, -1 нет)")]
+        public int Selected
+        {
+            get => (int?)Data["selected"] ?? -1;
+            set => Set("selected", value);
+        }
+
+        [Category("События"), DisplayName("selected_changed")]
+        public string SelectedChanged { get => Handler("selected_changed"); set => SetHandler("selected_changed", value); }
+    }
+
+    internal sealed class MenuStripPropertiesObject : ControlPropertiesObject
+    {
+        public MenuStripPropertiesObject(FormController c, JObject o) : base(c, o) { }
+
+        [Category("Контрол"), DisplayName("Пункты (Меню/Пункт)")]
+        public string[] Items
+        {
+            get => ((JArray)Data["items"]).Select(i => (string)i).ToArray();
+            set => Set("items", value);
+        }
+
+        [Category("События"), DisplayName("item_clicked")]
+        public string ItemClicked { get => Handler("item_clicked"); set => SetHandler("item_clicked", value); }
+    }
+
+    internal sealed class ProgressBarPropertiesObject : ControlPropertiesObject
+    {
+        public ProgressBarPropertiesObject(FormController c, JObject o) : base(c, o) { }
+
+        [Category("Контрол"), DisplayName("Минимум")]
+        public int Minimum { get => (int)Data["minimum"]; set => Set("minimum", value); }
+
+        [Category("Контрол"), DisplayName("Максимум")]
+        public int Maximum { get => (int)Data["maximum"]; set => Set("maximum", value); }
+
+        [Category("Контрол"), DisplayName("Значение")]
+        public int Value { get => (int)Data["value"]; set => Set("value", value); }
     }
 
     internal sealed class PanelPropertiesObject : ControlPropertiesObject

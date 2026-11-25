@@ -59,6 +59,14 @@ impl EventCx<'_> {
         self.signals.push(Signal::CheckedChanged(checked));
     }
 
+    pub fn selected_changed(&mut self, index: Option<usize>, text: impl Into<String>) {
+        self.signals.push(Signal::SelectedChanged(index, text.into()));
+    }
+
+    pub fn item_clicked(&mut self, item: impl Into<String>) {
+        self.signals.push(Signal::ItemClicked(item.into()));
+    }
+
     pub fn clipboard_get(&mut self) -> Option<String> {
         self.clipboard.get()
     }
@@ -136,6 +144,65 @@ pub trait ControlImpl: Control + 'static {
         if let Some(parent) = self.parent_mut() {
             parent.on_text_input(text, cx);
         }
+    }
+
+    /// Мышь движется над контролом.
+    fn on_mouse_move(&mut self, at: Point, cx: &mut EventCx) {
+        if let Some(parent) = self.parent_mut() {
+            parent.on_mouse_move(at, cx);
+        }
+    }
+
+    /// Сдвиг всплывающего окошка от левого края контрола.
+    fn popup_offset(&self) -> f32 {
+        self.parent().map_or(0.0, |p| p.popup_offset())
+    }
+
+    /// Колесо мыши; положительное значение — вверх, в строках.
+    fn on_wheel(&mut self, lines: f32, cx: &mut EventCx) {
+        if let Some(parent) = self.parent_mut() {
+            parent.on_wheel(lines, cx);
+        }
+    }
+
+    /// `Some`, пока открыто всплывающее окошко: оно рисуется поверх всей формы под контролом
+    /// (или над ним, если внизу нет места) и первым получает мышь.
+    fn popup_size(&self) -> Option<(f32, f32)> {
+        self.parent().and_then(|p| p.popup_size())
+    }
+
+    fn close_popup(&mut self) {
+        if let Some(parent) = self.parent_mut() {
+            parent.close_popup();
+        }
+    }
+
+    fn on_paint_popup(&mut self, painter: &mut Painter) {
+        if let Some(parent) = self.parent_mut() {
+            parent.on_paint_popup(painter);
+        }
+    }
+
+    fn on_popup_mouse_move(&mut self, at: Point) {
+        if let Some(parent) = self.parent_mut() {
+            parent.on_popup_mouse_move(at);
+        }
+    }
+
+    fn on_popup_mouse_down(&mut self, at: Point, cx: &mut EventCx) {
+        if let Some(parent) = self.parent_mut() {
+            parent.on_popup_mouse_down(at, cx);
+        }
+    }
+
+    /// Отмеченным среди соседей может быть только один (радиокнопка).
+    fn exclusive(&self) -> bool {
+        self.parent().is_some_and(|p| p.exclusive())
+    }
+
+    /// Снимает отметку; возвращает, была ли она.
+    fn uncheck(&mut self) -> bool {
+        self.parent_mut().is_some_and(|p| p.uncheck())
     }
 }
 

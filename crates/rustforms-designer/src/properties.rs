@@ -147,10 +147,15 @@ fn control_properties(
         ui.label("Имя");
         rename = committed(ui, &format!("name {name}"), &c.name);
         ui.end_row();
-        if c.kind != Kind::Panel {
+        if c.kind.has_text() {
             ui.label("Текст");
             let mut text = c.text.clone().unwrap_or_default();
-            if ui.add(TextEdit::singleline(&mut text).desired_width(f32::INFINITY)).changed() {
+            let edit = if c.multiline {
+                TextEdit::multiline(&mut text).desired_rows(3)
+            } else {
+                TextEdit::singleline(&mut text)
+            };
+            if ui.add(edit.desired_width(f32::INFINITY)).changed() {
                 c.text = Some(text);
             }
             ui.end_row();
@@ -166,10 +171,69 @@ fn control_properties(
         ui.checkbox(&mut c.enabled, "");
         ui.end_row();
         match c.kind {
-            Kind::CheckBox => {
+            Kind::CheckBox | Kind::RadioButton => {
                 ui.label("Отмечен");
                 ui.checkbox(&mut c.checked, "");
                 ui.end_row();
+            }
+            Kind::TextBox => {
+                ui.label("Многострочный");
+                if ui.checkbox(&mut c.multiline, "").changed()
+                    && !c.multiline
+                    && let Some(text) = &mut c.text
+                {
+                    *text = text.replace('\n', " ");
+                }
+                ui.end_row();
+            }
+            Kind::ComboBox | Kind::ListBox | Kind::MenuStrip => {
+                let hint = if c.kind == Kind::MenuStrip {
+                    "Пункты вида Меню/Пункт; Меню/- это разделитель"
+                } else {
+                    "Каждая строка списка с новой строки"
+                };
+                ui.label("Строки").on_hover_text(hint);
+                // Пустая последняя строка нужна, пока набирается следующая.
+                let mut text = c.items.join("\n");
+                let id = ui.make_persistent_id(("items", name));
+                if let Some(draft) = ui.data_mut(|d| d.get_temp::<String>(id)) {
+                    text = draft;
+                }
+                let edit = TextEdit::multiline(&mut text).desired_rows(4);
+                let response = ui.add(edit.desired_width(f32::INFINITY));
+                if response.changed() {
+                    c.items = text.lines().filter(|l| !l.is_empty()).map(str::to_owned).collect();
+                    c.selected = c.selected.filter(|&i| i < c.items.len());
+                    ui.data_mut(|d| d.insert_temp(id, text));
+                }
+                if response.lost_focus() {
+                    ui.data_mut(|d| d.remove_temp::<String>(id));
+                }
+                ui.end_row();
+                if c.kind.selectable() {
+                    ui.label("Выбрана");
+                    egui::ComboBox::from_id_salt(("selected", name))
+                        .selected_text(c.selected.and_then(|i| c.items.get(i)).map_or("—", |s| s))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut c.selected, None, "—");
+                            for (i, item) in c.items.iter().enumerate() {
+                                ui.selectable_value(&mut c.selected, Some(i), item);
+                            }
+                        });
+                    ui.end_row();
+                }
+            }
+            Kind::ProgressBar => {
+                for (label, value) in [
+                    ("Минимум", &mut c.minimum),
+                    ("Максимум", &mut c.maximum),
+                    ("Значение", &mut c.value),
+                ] {
+                    ui.label(label);
+                    ui.add(DragValue::new(value));
+                    ui.end_row();
+                }
+                c.maximum = c.maximum.max(c.minimum);
             }
             Kind::Label => color_row(ui, "Цвет текста", &mut c.fore_color),
             Kind::Panel => {
@@ -178,7 +242,7 @@ fn control_properties(
                 ui.checkbox(&mut c.border, "");
                 ui.end_row();
             }
-            Kind::Button | Kind::TextBox => {}
+            Kind::Button => {}
         }
         ui.label("Dock");
         egui::ComboBox::from_id_salt(("dock", name))

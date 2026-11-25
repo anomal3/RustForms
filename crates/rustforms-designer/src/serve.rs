@@ -25,7 +25,7 @@ pub struct Server {
 }
 
 fn event_named(name: &str) -> Option<Event> {
-    [Event::Load, Event::Click, Event::TextChanged, Event::CheckedChanged]
+    Event::ALL
         .into_iter()
         .find(|e| e.name() == name)
 }
@@ -207,6 +207,9 @@ impl Server {
         let optional = (!text.is_empty()).then(|| text.clone());
         let number = value.as_f64().map(|v| v as f32).filter(|v| v.is_finite());
         let flag = value.as_bool();
+        let list: Option<Vec<String>> = value
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect());
         let event = property.strip_prefix("event:").and_then(event_named);
         let mut known = true;
         self.document.edit(|m| {
@@ -220,6 +223,26 @@ impl Server {
                 "visible" => c.visible = flag.unwrap_or(c.visible),
                 "enabled" => c.enabled = flag.unwrap_or(c.enabled),
                 "checked" => c.checked = flag.unwrap_or(c.checked),
+                "multiline" => c.multiline = flag.unwrap_or(c.multiline),
+                "items" => {
+                    // Массивом или строкой с разделителями `;` и переводом строки.
+                    c.items = match list.as_ref() {
+                        Some(items) => items.clone(),
+                        None => text
+                            .split([';', '\n'])
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_owned)
+                            .collect(),
+                    };
+                    c.selected = c.selected.filter(|&i| i < c.items.len());
+                }
+                "selected" => {
+                    c.selected = number.filter(|&v| v >= 0.0).map(|v| v as usize);
+                }
+                "value" => c.value = number.map_or(c.value, |v| v as i32),
+                "minimum" => c.minimum = number.map_or(c.minimum, |v| v as i32),
+                "maximum" => c.maximum = number.map_or(c.maximum, |v| v as i32),
                 "border" => c.border = flag.unwrap_or(c.border),
                 "fore_color" => c.fore_color = optional,
                 "back_color" => c.back_color = optional,
@@ -270,7 +293,9 @@ impl Server {
                     "name": c.name, "kind": c.kind.name(), "parent": c.parent, "custom": c.custom,
                     "x": c.x, "y": c.y, "width": c.width, "height": c.height,
                     "frame": [x, y, w, h], "text": c.text, "visible": c.visible,
-                    "dock": c.dock.name(),
+                    "dock": c.dock.name(), "multiline": c.multiline, "items": c.items,
+                    "selected": c.selected, "value": c.value, "minimum": c.minimum,
+                    "maximum": c.maximum,
                     "anchor": c.anchor.iter().map(|s| s.name()).collect::<Vec<_>>(),
                     "enabled": c.enabled, "checked": c.checked, "border": c.border,
                     "fore_color": c.fore_color, "back_color": c.back_color, "events": events,

@@ -1,0 +1,40 @@
+[form]
+name = "MainForm"
+title = "RustForms — меню и диалоги"
+width = 440.0
+height = 260.0
+
+[[control]]
+type = "MenuStrip"
+name = "menu"
+x = 0.0
+y = 0.0
+width = 440.0
+height = 26.0
+dock = "top"
+items = ["Файл/Спросить имя…", "Файл/Открыть файл…", "Файл/-", "Файл/Выход", "Справка/О программе"]
+
+[control.events]
+item_clicked = "menu_item_clicked"
+
+[[control]]
+type = "Label"
+name = "result"
+x = 20.0
+y = 60.0
+width = 400.0
+height = 22.0
+text = "Выберите пункт меню"
+anchor = ["left", "top", "right"]
+
+[[control]]
+type = "Button"
+name = "ask_button"
+x = 20.0
+y = 100.0
+width = 140.0
+height = 30.0
+text = "Спросить имя"
+
+[control.events]
+click = "ask_button_click"

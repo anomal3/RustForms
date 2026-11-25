@@ -1,7 +1,8 @@
 use std::{cell::RefCell, ops::Deref, rc::Rc};
 
 use crate::{
-    AnyControl, CheckBox, Container, ControlId, ControlImpl, Handle, TextBox, Ui,
+    AnyControl, CheckBox, ComboBox, Container, ControlId, ControlImpl, Handle, ListBox,
+    MenuStrip, RadioButton, TextBox, Ui,
 };
 
 /// [`TextBox`] и всё, что от него «унаследовано».
@@ -9,9 +10,21 @@ pub trait RaisesTextChanged {}
 impl RaisesTextChanged for TextBox {}
 impl<T: Deref> RaisesTextChanged for T where T::Target: RaisesTextChanged {}
 
+/// [`MenuStrip`] и всё, что от него «унаследовано».
+pub trait RaisesItemClicked {}
+impl RaisesItemClicked for MenuStrip {}
+impl<T: Deref> RaisesItemClicked for T where T::Target: RaisesItemClicked {}
+
+/// [`ListBox`], [`ComboBox`] и всё, что от них «унаследовано».
+pub trait RaisesSelectedChanged {}
+impl RaisesSelectedChanged for ListBox {}
+impl RaisesSelectedChanged for ComboBox {}
+impl<T: Deref> RaisesSelectedChanged for T where T::Target: RaisesSelectedChanged {}
+
 /// [`CheckBox`] и всё, что от него «унаследовано».
 pub trait RaisesCheckedChanged {}
 impl RaisesCheckedChanged for CheckBox {}
+impl RaisesCheckedChanged for RadioButton {}
 impl<T: Deref> RaisesCheckedChanged for T where T::Target: RaisesCheckedChanged {}
 
 #[derive(Clone, Copy, Debug)]
@@ -31,6 +44,20 @@ pub struct CheckedChangedArgs {
     pub checked: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct SelectedChangedArgs {
+    pub sender: ControlId,
+    pub index: Option<usize>,
+    pub text: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct MenuItemArgs {
+    pub sender: ControlId,
+    /// Путь пункта, например `"Файл/Выход"`.
+    pub item: String,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct LoadArgs;
 
@@ -40,6 +67,8 @@ pub(crate) enum Signal {
     Click,
     TextChanged(String),
     CheckedChanged(bool),
+    SelectedChanged(Option<usize>, String),
+    ItemClicked(String),
 }
 
 type Handler<S, A> = Box<dyn FnMut(&mut S, &mut Ui, &A)>;
@@ -69,6 +98,8 @@ pub struct View<S> {
     click: Vec<(ControlId, Handler<S, ClickArgs>)>,
     text_changed: Vec<(ControlId, Handler<S, TextChangedArgs>)>,
     checked_changed: Vec<(ControlId, Handler<S, CheckedChangedArgs>)>,
+    selected_changed: Vec<(ControlId, Handler<S, SelectedChangedArgs>)>,
+    item_clicked: Vec<(ControlId, Handler<S, MenuItemArgs>)>,
 }
 
 impl<S> Default for View<S> {
@@ -79,6 +110,8 @@ impl<S> Default for View<S> {
             click: Vec::new(),
             text_changed: Vec::new(),
             checked_changed: Vec::new(),
+            selected_changed: Vec::new(),
+            item_clicked: Vec::new(),
         }
     }
 }
@@ -145,6 +178,22 @@ impl<S: 'static> View<S> {
         self.checked_changed.push((control.id(), Box::new(handler)));
     }
 
+    pub fn on_selected_changed<T: RaisesSelectedChanged>(
+        &mut self,
+        control: Handle<T>,
+        handler: impl FnMut(&mut S, &mut Ui, &SelectedChangedArgs) + 'static,
+    ) {
+        self.selected_changed.push((control.id(), Box::new(handler)));
+    }
+
+    pub fn on_item_clicked<T: RaisesItemClicked>(
+        &mut self,
+        control: Handle<T>,
+        handler: impl FnMut(&mut S, &mut Ui, &MenuItemArgs) + 'static,
+    ) {
+        self.item_clicked.push((control.id(), Box::new(handler)));
+    }
+
     /// Подключает базовую форму: `part` достаёт её из производной, а `build` добавляет
     /// её контролы и подписки. Они идут раньше добавленных после этого вызова.
     pub fn include<B: 'static, R>(
@@ -180,6 +229,8 @@ impl<S: 'static> View<S> {
         self.click.extend(adapt_all(part, inner.click));
         self.text_changed.extend(adapt_all(part, inner.text_changed));
         self.checked_changed.extend(adapt_all(part, inner.checked_changed));
+        self.selected_changed.extend(adapt_all(part, inner.selected_changed));
+        self.item_clicked.extend(adapt_all(part, inner.item_clicked));
         result
     }
 
@@ -210,6 +261,14 @@ impl<S: 'static> View<S> {
             Signal::CheckedChanged(checked) => {
                 let args = CheckedChangedArgs { sender, checked };
                 call(&mut self.checked_changed, sender, args, state, ui)
+            }
+            Signal::SelectedChanged(index, text) => {
+                let args = SelectedChangedArgs { sender, index, text };
+                call(&mut self.selected_changed, sender, args, state, ui)
+            }
+            Signal::ItemClicked(item) => {
+                let args = MenuItemArgs { sender, item };
+                call(&mut self.item_clicked, sender, args, state, ui)
             }
         }
     }

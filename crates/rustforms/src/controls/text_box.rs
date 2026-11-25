@@ -5,8 +5,10 @@ use crate::{
 };
 
 const PADDING: f32 = 6.0;
+const LINE: f32 = 20.0;
+const TOP: f32 = 4.0;
 
-/// Однострочное поле ввода.
+/// Поле ввода; по умолчанию однострочное, см. [`TextBox::set_multiline`].
 #[derive(Control)]
 pub struct TextBox {
     base: ControlBase,
@@ -15,6 +17,12 @@ pub struct TextBox {
     cursor: usize,
     anchor: usize,
     scroll: f32,
+    multiline: bool,
+    /// Первая видимая строка.
+    top: usize,
+    /// Прокрутить к курсору при следующей отрисовке (колесо это отменяет).
+    follow: bool,
+    wheel: f32,
 }
 
 impl TextBox {
@@ -25,6 +33,10 @@ impl TextBox {
             cursor: 0,
             anchor: 0,
             scroll: 0.0,
+            multiline: false,
+            top: 0,
+            follow: true,
+            wheel: 0.0,
         }
     }
 
@@ -32,8 +44,124 @@ impl TextBox {
         &self.text
     }
 
+    pub fn multiline(&self) -> bool {
+        self.multiline
+    }
+
+    /// Несколько строк: Enter переводит строку. Переносов по словам нет.
+    pub fn set_multiline(&mut self, multiline: bool) {
+        self.multiline = multiline;
+        let text = std::mem::take(&mut self.text);
+        self.set_text(text);
+    }
+
+    fn clean(&self, text: &str) -> String {
+        if self.multiline {
+            text.replace("\r\n", "\n").chars().filter(|&c| c == '\n' || !c.is_control()).collect()
+        } else {
+            single_line(text)
+        }
+    }
+
+    /// Байтовые границы строки, в которой находится позиция.
+    fn line_of(&self, index: usize) -> std::ops::Range<usize> {
+        let start = self.text[..index].rfind('\n').map_or(0, |i| i + 1);
+        let end = self.text[index..].find('\n').map_or(self.text.len(), |i| index + i);
+        start..end
+    }
+
+    /// Позиция в строке `line`, ближайшая к горизонтальной координате.
+    fn index_in(&self, line: std::ops::Range<usize>, x: f32, cx: &mut EventCx) -> usize {
+        let offset = cx
+            .text_system()
+            .caret_positions(&self.text[line.clone()])
+            .into_iter()
+            .min_by(|a, b| (a.1 - x).abs().total_cmp(&(b.1 - x).abs()))
+            .map_or(0, |p| p.0);
+        line.start + offset
+    }
+
+    fn vertical(&mut self, down: bool, extend: bool, cx: &mut EventCx) {
+        let line = self.line_of(self.cursor);
+        let x = cx
+            .text_system()
+            .caret_positions(&self.text[line.clone()])
+            .into_iter()
+            .find(|p| p.0 == self.cursor - line.start)
+            .map_or(0.0, |p| p.1);
+        let target = if down {
+            (line.end < self.text.len()).then(|| self.line_of(line.end + 1))
+        } else {
+            (line.start > 0).then(|| self.line_of(line.start - 1))
+        };
+        if let Some(target) = target {
+            let index = self.index_in(target, x, cx);
+            self.move_to(index, extend);
+        }
+    }
+
+    fn paint_lines(&mut self, p: &mut Painter) {
+        let state = p.state();
+        let area = p.area();
+        let width = (area.width - PADDING * 2.0).max(0.0);
+        let visible = (((area.height - TOP * 2.0) / LINE).floor() as usize).max(1);
+        let lines: Vec<&str> = self.text.split('\n').collect();
+        let cursor_line = self.text[..self.cursor].matches('\n').count();
+        let cursor_start = self.line_of(self.cursor).start;
+        let cursor_x = p
+            .text_system()
+            .caret_positions(lines[cursor_line])
+            .into_iter()
+            .find(|q| q.0 == self.cursor - cursor_start)
+            .map_or(0.0, |q| q.1);
+        if self.follow {
+            self.follow = false;
+            if cursor_line < self.top {
+                self.top = cursor_line;
+            } else if cursor_line >= self.top + visible {
+                self.top = cursor_line + 1 - visible;
+            }
+            self.scroll = self.scroll.max(cursor_x - width + 1.0).min(cursor_x).max(0.0);
+        }
+        self.top = self.top.min(lines.len().saturating_sub(visible));
+
+        let selection = self.selection();
+        let ink = if state.enabled { Color::TEXT } else { Color::TEXT_DISABLED };
+        let mut start = 0;
+        for (number, line) in lines.iter().enumerate() {
+            let end = start + line.len();
+            if number >= self.top && number < self.top + visible {
+                let y = TOP + (number - self.top) as f32 * LINE;
+                let inner = Rect::new(PADDING, y, width, LINE);
+                if state.focused && selection.start <= end && selection.end > start {
+                    let positions = p.text_system().caret_positions(line);
+                    let x_of = |index: usize| {
+                        positions.iter().find(|q| q.0 == index).map_or(0.0, |q| q.1)
+                    };
+                    let from = x_of(selection.start.saturating_sub(start));
+                    // Выделенный перевод строки показывается небольшим хвостом.
+                    let to = if selection.end > end {
+                        x_of(line.len()) + 6.0
+                    } else {
+                        x_of(selection.end - start)
+                    };
+                    let band = Rect::new(inner.x + from - self.scroll, y, to - from, LINE);
+                    p.fill_rect(band.intersect(&inner), Color::SELECTION);
+                }
+                p.text(line, inner, ink, Align::Left, self.scroll);
+                let x = cursor_x - self.scroll;
+                if state.focused && number == cursor_line && (0.0..=width).contains(&x) {
+                    p.fill_rect(Rect::new(PADDING + x, y + 1.0, 1.0, LINE - 2.0), Color::TEXT);
+                }
+            }
+            start = end + 1;
+        }
+    }
+
     pub fn set_text(&mut self, text: impl Into<String>) {
-        self.text = single_line(&text.into());
+        self.text = self.clean(&text.into());
+        self.top = 0;
+        self.follow = true;
         self.cursor = self.text.len();
         self.anchor = self.cursor;
         self.scroll = 0.0;
@@ -52,6 +180,7 @@ impl TextBox {
         if range.is_empty() && with.is_empty() {
             return;
         }
+        self.follow = true;
         self.cursor = range.start + with.len();
         self.anchor = self.cursor;
         self.text.replace_range(range, with);
@@ -71,18 +200,27 @@ impl TextBox {
 
     fn move_to(&mut self, index: usize, extend: bool) {
         self.cursor = index;
+        self.follow = true;
         if !extend {
             self.anchor = index;
         }
     }
 
-    fn index_at(&self, x: f32, cx: &mut EventCx) -> usize {
-        let target = x - PADDING + self.scroll;
-        cx.text_system()
-            .caret_positions(&self.text)
-            .into_iter()
-            .min_by(|a, b| (a.1 - target).abs().total_cmp(&(b.1 - target).abs()))
-            .map_or(0, |p| p.0)
+    fn index_at(&self, at: Point, cx: &mut EventCx) -> usize {
+        let line = if self.multiline {
+            let number = self.top + ((at.y - TOP) / LINE).floor().max(0.0) as usize;
+            let mut start = 0;
+            for _ in 0..number {
+                match self.text[start..].find('\n') {
+                    Some(i) => start += i + 1,
+                    None => break,
+                }
+            }
+            self.line_of(start)
+        } else {
+            0..self.text.len()
+        };
+        self.index_in(line, at.x - PADDING + self.scroll, cx)
     }
 }
 
@@ -113,6 +251,10 @@ impl ControlImpl for TextBox {
         p.stroke_rect(area, Color::BORDER, 1.0);
         if state.focused {
             p.fill_rect(Rect::new(0.0, area.height - 2.0, area.width, 2.0), Color::ACCENT);
+        }
+        if self.multiline {
+            self.paint_lines(p);
+            return;
         }
 
         let inner = Rect::new(PADDING, 2.0, (area.width - PADDING * 2.0).max(0.0), area.height - 4.0);
@@ -145,17 +287,27 @@ impl ControlImpl for TextBox {
     }
 
     fn on_mouse_down(&mut self, at: Point, mods: Modifiers, cx: &mut EventCx) {
-        let index = self.index_at(at.x, cx);
+        let index = self.index_at(at, cx);
         self.move_to(index, mods.shift);
     }
 
     fn on_mouse_drag(&mut self, at: Point, cx: &mut EventCx) {
-        let index = self.index_at(at.x, cx);
+        let index = self.index_at(at, cx);
         self.move_to(index, true);
     }
 
+    fn on_wheel(&mut self, lines: f32, _cx: &mut EventCx) {
+        if self.multiline {
+            self.wheel += lines;
+            let whole = self.wheel.trunc();
+            self.wheel -= whole;
+            // Верхнюю границу проверит отрисовка.
+            self.top = (self.top as f32 - whole).max(0.0) as usize;
+        }
+    }
+
     fn on_text_input(&mut self, text: &str, cx: &mut EventCx) {
-        let text = single_line(text);
+        let text = self.clean(text);
         if !text.is_empty() {
             self.replace_selection(&text, cx);
         }
@@ -172,8 +324,11 @@ impl ControlImpl for TextBox {
             }
             Key::Left => self.move_to(self.previous(self.cursor), mods.shift),
             Key::Right => self.move_to(self.next(self.cursor), mods.shift),
-            Key::Home => self.move_to(0, mods.shift),
-            Key::End => self.move_to(self.text.len(), mods.shift),
+            Key::Home => self.move_to(self.line_of(self.cursor).start, mods.shift),
+            Key::End => self.move_to(self.line_of(self.cursor).end, mods.shift),
+            Key::Up if self.multiline => self.vertical(false, mods.shift, cx),
+            Key::Down if self.multiline => self.vertical(true, mods.shift, cx),
+            Key::Enter if self.multiline => self.replace_selection("\n", cx),
             Key::SelectAll => {
                 self.anchor = 0;
                 self.cursor = self.text.len();

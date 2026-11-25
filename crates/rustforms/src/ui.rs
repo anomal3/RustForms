@@ -1,10 +1,11 @@
 use std::{
     marker::PhantomData,
     ops::Deref,
+    rc::Rc,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use crate::{Color, Panel};
+use crate::{Color, Panel, forms::PendingForm};
 
 /// Контролы, внутрь которых можно класть другие: [`Panel`] и «унаследованные» от неё.
 pub trait Container {}
@@ -49,6 +50,12 @@ pub struct Ui {
     pub height: f32,
     pub back_color: Color,
     pub(crate) close_requested: bool,
+    /// Закрыта кнопкой «ОК».
+    pub(crate) accepted: bool,
+    /// Формы, которые просили открыть.
+    pub(crate) pending: Vec<PendingForm>,
+    /// Окно формы, если оно есть: владелец системных диалогов.
+    pub(crate) owner: Option<Rc<winit::window::Window>>,
 }
 
 impl Ui {
@@ -59,10 +66,19 @@ impl Ui {
             height,
             back_color: Color::FORM,
             close_requested: false,
+            accepted: false,
+            pending: Vec::new(),
+            owner: None,
         }
     }
 
     pub fn close(&mut self) {
+        self.close_requested = true;
+    }
+
+    /// Закрыть как «ОК»: открывший диалог получит `accepted = true`.
+    pub fn accept(&mut self) {
+        self.accepted = true;
         self.close_requested = true;
     }
 }

@@ -194,6 +194,20 @@ impl<S: 'static> Application<S> {
     ) {
         let (rect, _) = self.placement(index);
         let local = Point::new(self.mouse.x - rect.x, self.mouse.y - rect.y);
+        let local = if self.control(index).popup_size().is_some() {
+            let popup = self.popup_rect(index).unwrap_or(rect);
+            if popup.contains(self.mouse) {
+                Point::new(self.mouse.x - popup.x, self.mouse.y - popup.y)
+            } else {
+                local
+            }
+        } else {
+            local
+        };
+        let size = match self.popup_rect(index) {
+            Some(popup) if popup.contains(self.mouse) => (popup.width, popup.height),
+            _ => (rect.width, rect.height),
+        };
         let node = &self.view.nodes[index];
         let id = node.id;
         let mut signals: Vec<Signal> = Vec::new();
@@ -201,9 +215,29 @@ impl<S: 'static> Application<S> {
             text: &mut self.text,
             clipboard: &mut self.clipboard,
             signals: &mut signals,
-            size: (rect.width, rect.height),
+            size,
         };
         action((node.get)(&mut self.state), local, &mut cx);
+        // Отметка радиокнопки снимает отметки соседних — до вызова обработчиков.
+        let mut cleared = Vec::new();
+        if signals.iter().any(|s| matches!(s, Signal::CheckedChanged(true)))
+            && self.control(index).exclusive()
+        {
+            let parent = self.view.nodes[index].parent;
+            for other in 0..self.view.nodes.len() {
+                if other != index
+                    && self.view.nodes[other].parent == parent
+                    && self.control(other).exclusive()
+                    && self.control(other).uncheck()
+                {
+                    cleared.push(self.view.nodes[other].id);
+                }
+            }
+        }
+        for other in cleared {
+            let signal = Signal::CheckedChanged(false);
+            self.view.dispatch(other, signal, &mut self.state, &mut self.ui);
+        }
         for signal in signals {
             self.view.dispatch(id, signal, &mut self.state, &mut self.ui);
         }
@@ -211,10 +245,66 @@ impl<S: 'static> Application<S> {
         self.layout();
     }
 
+    /// Контрол с открытым всплывающим окошком.
+    fn popup_owner(&mut self) -> Option<usize> {
+        (0..self.view.nodes.len())
+            .find(|&i| self.control(i).popup_size().is_some() && self.is_shown(i))
+    }
+
+    /// Где в окне рисуется всплывающее окошко контрола.
+    fn popup_rect(&mut self, index: usize) -> Option<Rect> {
+        let (width, height) = self.control(index).popup_size()?;
+        let (frame, _) = self.placement(index);
+        let below = frame.y + frame.height;
+        let y = if below + height > self.ui.height && frame.y >= height {
+            frame.y - height
+        } else {
+            below
+        };
+        let offset = self.control(index).popup_offset();
+        // Окошко не выходит за правый край.
+        let x = (frame.x + offset).min(self.ui.width - width).max(0.0);
+        Some(Rect::new(x, y, width, height))
+    }
+
+    pub fn close_popups(&mut self) {
+        for index in 0..self.view.nodes.len() {
+            self.control(index).close_popup();
+        }
+    }
+
+    /// Владелец окошка, если мышь сейчас над ним.
+    fn popup_under_mouse(&mut self) -> Option<usize> {
+        let owner = self.popup_owner()?;
+        self.popup_rect(owner)?.contains(self.mouse).then_some(owner)
+    }
+
+    pub fn wheel(&mut self, lines: f32) {
+        self.layout();
+        let target = match self.popup_under_mouse() {
+            Some(owner) => Some(owner),
+            None => {
+                self.close_popups();
+                self.hit_test(self.mouse).filter(|&i| self.is_active(i))
+            }
+        };
+        if let Some(index) = target {
+            self.with_control(index, |c, _, cx| c.on_wheel(lines, cx));
+        }
+    }
+
     pub fn mouse_move(&mut self, at: Point) {
         self.layout();
         self.mouse = at;
+        if let Some(owner) = self.popup_under_mouse() {
+            self.hover = None;
+            self.with_control(owner, |c, local, _| c.on_popup_mouse_move(local));
+            return;
+        }
         self.hover = self.hit_test(at);
+        if let Some(index) = self.hover.filter(|&i| self.capture.is_none() && self.is_active(i)) {
+            self.with_control(index, |c, local, cx| c.on_mouse_move(local, cx));
+        }
         if let Some(index) = self.capture {
             self.with_control(index, |c, local, cx| c.on_mouse_drag(local, cx));
         }
@@ -225,6 +315,16 @@ impl<S: 'static> Application<S> {
     }
 
     pub fn mouse_down(&mut self, mods: Modifiers) {
+        if let Some(owner) = self.popup_owner() {
+            if self.popup_under_mouse().is_some() {
+                self.with_control(owner, |c, local, cx| c.on_popup_mouse_down(local, cx));
+                return;
+            }
+            // Щелчок по самому владельцу он обрабатывает сам.
+            if self.hit_test(self.mouse) != Some(owner) {
+                self.close_popups();
+            }
+        }
         let Some(index) = self.hit_test(self.mouse) else { return };
         if !self.is_active(index) {
             return;
@@ -248,7 +348,13 @@ impl<S: 'static> Application<S> {
     }
 
     pub fn key(&mut self, key: Key, mods: Modifiers) {
+        // Escape закрывает окошко, даже если у его владельца нет фокуса (меню).
+        if key == Key::Escape && self.popup_owner().is_some() {
+            self.close_popups();
+            return;
+        }
         if key == Key::Tab {
+            self.close_popups();
             self.move_focus(mods.shift);
             return;
         }
@@ -315,6 +421,18 @@ impl<S: 'static> Application<S> {
                 state,
             };
             (self.view.nodes[index].get)(&mut self.state).on_paint(&mut painter);
+        }
+        // Всплывающее окошко — поверх всех контролов.
+        if let Some(owner) = self.popup_owner()
+            && let Some(frame) = self.popup_rect(owner)
+        {
+            let clip = frame.intersect(&window);
+            if !clip.is_empty() {
+                let state = VisualState { enabled: true, ..VisualState::default() };
+                let mut painter =
+                    Painter { pixmap, text: &mut self.text, scale, frame, clip, state };
+                (self.view.nodes[owner].get)(&mut self.state).on_paint_popup(&mut painter);
+            }
         }
     }
 }

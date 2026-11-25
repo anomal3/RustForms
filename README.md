@@ -14,9 +14,10 @@ fn button1_click(&mut self, _ui: &mut Ui, _e: &ClickArgs) {
 
 ## Возможности
 
-- **Контролы:** `Button`, `Label`, `TextBox` (однострочный, с выделением и буфером обмена), `CheckBox`, `Panel`.
-- **События:** `load`, `click`, `text_changed`, `checked_changed`; обработчики — обычные методы формы.
+- **Контролы:** `Button`, `Label`, `TextBox` (однострочный, с выделением и буфером обмена), `CheckBox`, `RadioButton`, `ComboBox`, `ListBox`, `ProgressBar`, `MenuStrip`, `Panel`; поле ввода бывает многострочным.
+- **События:** `load`, `click`, `text_changed`, `checked_changed`, `selected_changed`, `item_clicked`; обработчики — обычные методы формы.
 - **Размещение:** якоря и Dock, как в WinForms.
+- **Окна:** главное меню, системные сообщения и выбор файлов, несколько форм и диалоги.
 - **Свои контролы** на базе готовых и **производные формы**.
 - **Дизайнер:** перетаскивание, сетка, свойства, отмена и повтор, копирование, двойной клик создаёт обработчик.
 - **Плагины IDE:** форма открывается вкладкой, элементы и свойства — в боковых окнах самой IDE.
@@ -24,7 +25,8 @@ fn button1_click(&mut self, _ui: &mut Ui, _e: &ClickArgs) {
 | | |
 |---|---|
 | ![Пример hello](docs/hello.png) | ![Свои контролы](docs/custom.png) |
-| ![Якоря и Dock](docs/anchors.png) | |
+| ![Якоря и Dock](docs/anchors.png) | ![Списки и другие контролы](docs/controls.png) |
+| ![Меню](docs/menu.png) | |
 
 ## Платформы
 
@@ -45,6 +47,7 @@ git clone https://github.com/anomal3/RustForms.git
 cd RustForms
 cargo run -p hello                  # пример приложения
 cargo run -p custom                 # свои контролы и производная форма
+cargo run -p dialogs                # меню, диалоги и вторая форма
 cargo run -p rustforms-designer     # дизайнер
 ```
 
@@ -114,6 +117,55 @@ fn main() -> Result<(), rustforms::RunError> {
 - Изменение свойства из кода **не вызывает событие**.
 - Добавить контрол во время работы нельзя: набор контролов задан структурой формы.
 - Имена `data` и `create` заняты сгенерированным кодом.
+
+## Списки и прочие контролы
+
+```rust
+self.combo_box1.set_items(["Самара", "Казань"]);
+self.combo_box1.set_selected_index(Some(0));
+let city = self.combo_box1.selected_text();      // Option<&str>
+
+self.progress_bar1.set_value(60);                // диапазон по умолчанию 0..100
+self.text_box1.set_multiline(true);
+```
+
+- Радиокнопки одного родителя (формы или панели) образуют группу.
+- `set_checked` и `set_selected_index` из кода не вызывают события и не снимают отметки с соседних радиокнопок.
+
+## Меню, диалоги и вторая форма
+
+```rust
+fn menu_item_clicked(&mut self, ui: &mut Ui, e: &MenuItemArgs) {
+    match e.item.as_str() {
+        "Файл/Открыть" => {
+            if let Some(path) = ui.open_file(&[("Текст", &["txt", "md"])]) {
+                self.result.set_text(path.display().to_string());
+            }
+        }
+        "Файл/Выход" if ui.confirm("Выход", "Закрыть программу?") => ui.close(),
+        "Справка/О программе" => ui.message_box("О программе", "RustForms"),
+        _ => {}
+    }
+}
+```
+
+Пункты меню задаются строками `"Меню/Пункт"`, `"Меню/-"` — разделитель (уровень вложенности один). Ещё есть `ui.save_file(..)` и `ui.pick_folder()`.
+
+Вторая форма — как `ShowDialog`, но обработчик **не ждёт** закрытия: что делать потом, задаётся замыканием.
+
+```rust
+ui.show_dialog(NameForm::create(), |me: &mut MainForm, dialog: &mut NameForm, ok, _ui| {
+    if ok {                                      // в диалоге вызвали ui.accept()
+        me.result.set_text(dialog.name_box.text());
+    }
+});
+
+ui.show(NameForm::create());                     // обычное немодальное окно
+```
+
+На Linux системные окна идут через `xdg-desktop-portal` (выбор файлов) и `zenity` (сообщения); там они **не проверялись**.
+
+Закрытие главного окна завершает программу. Полный пример: [`examples/dialogs`](examples/dialogs/src).
 
 ## Якоря и Dock
 
@@ -208,7 +260,7 @@ crates/rustforms-model      формат .rfrm, генератор кода, в�
 crates/rustforms-designer   дизайнер: окно и режим serve
 plugins/rustrover           плагин RustRover (Java)
 plugins/visualstudio        расширение Visual Studio (C#)
-examples/                   hello, custom
+examples/                   hello, custom, dialogs
 ```
 
 Проверка: `cargo test` и `cargo clippy --all-targets`.
@@ -217,8 +269,8 @@ examples/                   hello, custom
 
 ## Чего пока нет
 
-- `RadioButton`, `ComboBox`, `ListBox`, `ProgressBar`, многострочное поле ввода.
-- Меню, диалоги (`MessageBox`, выбор файла), несколько окон.
+- Свободный ввод в `ComboBox`, перенос по словам в многострочном поле, выбор нескольких строк, таблицы и деревья.
+- Вложенные подменю, значки и горячие клавиши меню, контекстное меню, панель инструментов.
 - Стили и темы, привязка данных, разметка в духе XAML.
 - Ввод через IME (китайский, японский), доступность для экранных дикторов.
 - Мигание курсора и контекстное меню в поле ввода.

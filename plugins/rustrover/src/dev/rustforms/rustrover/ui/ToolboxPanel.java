@@ -12,7 +12,8 @@ import javax.swing.TransferHandler;
 
 /** Список элементов: щелчок и затем щелчок по форме, либо перетаскивание на неё. */
 public final class ToolboxPanel extends JPanel {
-    private final JList<String> list = new JList<>(new String[] {"Button", "Label", "TextBox", "CheckBox", "Panel"});
+    private final JList<String> list = new JList<>(new String[] {
+            "Button", "Label", "TextBox", "CheckBox", "RadioButton", "ComboBox", "ListBox", "ProgressBar", "MenuStrip", "Panel"});
 
     public ToolboxPanel(FormController controller) {
         super(new BorderLayout());

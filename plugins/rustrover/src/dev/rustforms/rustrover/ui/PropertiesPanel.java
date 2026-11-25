@@ -127,8 +127,13 @@ public final class PropertiesPanel extends JPanel {
         if (control != null) {
             String kind = text(control, "kind");
             next.add(new Row("Имя", selected, "name", Type.TEXT, selected));
-            if (!kind.equals("Panel")) {
-                next.add(new Row("Текст", selected, "text", Type.TEXT, text(control, "text")));
+            if (List.of("Button", "Label", "TextBox", "CheckBox", "RadioButton").contains(kind)) {
+                // Переводы строк многострочного поля показываются как \n.
+                String value = text(control, "text");
+                if (control.get("multiline").getAsBoolean()) {
+                    value = value.replace("\n", "\\n");
+                }
+                next.add(new Row("Текст", selected, "text", Type.TEXT, value));
             }
             for (String[] p : new String[][] {{"X", "x"}, {"Y", "y"}, {"Ширина", "width"}, {"Высота", "height"}}) {
                 next.add(new Row(p[0], selected, p[1], Type.NUMBER, control.get(p[1]).getAsInt()));
@@ -140,7 +145,25 @@ public final class PropertiesPanel extends JPanel {
             }
             next.add(new Row("Видимый", selected, "visible", Type.FLAG, control.get("visible").getAsBoolean()));
             next.add(new Row("Доступен", selected, "enabled", Type.FLAG, control.get("enabled").getAsBoolean()));
-            if (kind.equals("CheckBox")) {
+            if (kind.equals("TextBox")) {
+                next.add(new Row("Многострочный", selected, "multiline", Type.FLAG, control.get("multiline").getAsBoolean()));
+            }
+            if (kind.equals("ComboBox") || kind.equals("ListBox") || kind.equals("MenuStrip")) {
+                List<String> items = new ArrayList<>();
+                control.getAsJsonArray("items").forEach(item -> items.add(item.getAsString()));
+                next.add(new Row("Строки (через ;)", selected, "items", Type.TEXT, String.join("; ", items)));
+                if (!kind.equals("MenuStrip")) {
+                    JsonElement chosen = control.get("selected");
+                    next.add(new Row("Выбрана (с 0, -1 нет)", selected, "selected", Type.NUMBER,
+                            chosen.isJsonNull() ? -1 : chosen.getAsInt()));
+                }
+            }
+            if (kind.equals("ProgressBar")) {
+                for (String[] p : new String[][] {{"Минимум", "minimum"}, {"Максимум", "maximum"}, {"Значение", "value"}}) {
+                    next.add(new Row(p[0], selected, p[1], Type.NUMBER, control.get(p[1]).getAsInt()));
+                }
+            }
+            if (kind.equals("CheckBox") || kind.equals("RadioButton")) {
                 next.add(new Row("Отмечен", selected, "checked", Type.FLAG, control.get("checked").getAsBoolean()));
             }
             if (kind.equals("Label")) {
@@ -240,6 +263,10 @@ public final class PropertiesPanel extends JPanel {
                 return;
             }
             Object parsed = value;
+            if (row.property().equals("text") && row.owner() != null
+                    && controller.control(row.owner()).get("multiline").getAsBoolean()) {
+                parsed = String.valueOf(value).replace("\\n", "\n");
+            }
             if (row.type() == Type.NUMBER) {
                 try {
                     parsed = Double.parseDouble(String.valueOf(value).trim().replace(',', '.'));

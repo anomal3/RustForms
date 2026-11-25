@@ -1,0 +1,37 @@
+[form]
+name = "NameForm"
+title = "Как вас зовут?"
+width = 300.0
+height = 110.0
+
+[[control]]
+type = "TextBox"
+name = "name_box"
+x = 16.0
+y = 20.0
+width = 268.0
+height = 28.0
+
+[[control]]
+type = "Button"
+name = "ok_button"
+x = 96.0
+y = 66.0
+width = 90.0
+height = 28.0
+text = "ОК"
+
+[control.events]
+click = "ok_button_click"
+
+[[control]]
+type = "Button"
+name = "cancel_button"
+x = 194.0
+y = 66.0
+width = 90.0
+height = 28.0
+text = "Отмена"
+
+[control.events]
+click = "cancel_button_click"

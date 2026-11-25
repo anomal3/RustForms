@@ -18,7 +18,9 @@ namespace RustForms.VisualStudio
     internal sealed class EditorPane : WindowPane, IVsPersistDocData, IVsToolboxUser
     {
         private const string ToolboxTab = "RustForms";
-        private static readonly string[] Kinds = { "Button", "Label", "TextBox", "CheckBox", "Panel" };
+        private static readonly string[] Kinds = {
+            "Button", "Label", "TextBox", "CheckBox", "RadioButton", "ComboBox", "ListBox", "ProgressBar", "MenuStrip", "Panel",
+        };
 
         private readonly IServiceProvider package;
         private readonly string file;

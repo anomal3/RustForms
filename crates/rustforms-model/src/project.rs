@@ -51,7 +51,9 @@ pub fn load(rfrm: &Path) -> Result<FormModel, Error> {
 
 fn template(name: &str, stem: &str) -> String {
     format!(
-        "use rustforms::prelude::*;
+        "// Пока обработчиков нет, этим ничего не пользуется.
+#[allow(unused_imports)]
+use rustforms::prelude::*;
 
 #[path = \"{stem}.designer.rs\"]
 mod designer;
